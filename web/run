@@ -10,7 +10,7 @@ cargo build --lib --release --target wasm32-unknown-unknown --no-default-feature
 mkdir -p "$out"
 wasm=target/wasm32-unknown-unknown/release/lazyui.wasm
 if command -v wasm-opt >/dev/null; then wasm-opt -Oz --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int "$wasm" -o "$out/lazyui.wasm"; else cp "$wasm" "$out/lazyui.wasm"; fi
-cp "$here/lazyui.js" "$here/index.html" "$out/"
+cp "$here/lazyui.js" "$here/skin.js" "$here/index.html" "$out/"
 cp "$root/examples/demo.lui" "$out/demo.lui"
 printf 'lazyui web: %s bytes wasm in %s\n' "$(wc -c <"$out/lazyui.wasm")" "$out" >&2
 [ "${WEB_NO_SERVE:-}" = 1 ] && exit 0

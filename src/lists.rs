@@ -3,7 +3,7 @@
 use crate::canvas::{str_width, Canvas, Rect, Style};
 use crate::input::{Event, Key, MouseKind};
 use crate::native::{Cx, Def, EvCx, Widget};
-use crate::ui::Value;
+use crate::ui::{jstr, Value};
 use crate::widgets::Res;
 use std::collections::HashSet;
 
@@ -125,6 +125,46 @@ impl Tree {
 }
 
 impl Widget for Tree {
+    fn describe(&self, _cx: &Cx) -> String {
+        let vis = self.visible();
+        let nodes: Vec<String> = vis
+            .iter()
+            .map(|&i| {
+                let n = &self.nodes[i];
+                format!("{{\"path\":{},\"name\":{},\"depth\":{},\"folder\":{},\"open\":{}}}", jstr(&n.path), jstr(&n.name), n.depth, n.folder, self.open.contains(&n.path))
+            })
+            .collect();
+        format!("{{\"nodes\":[{}],\"cursor\":{}}}", nodes.join(","), self.cursor)
+    }
+
+    fn act(&mut self, action: &str, arg: &str, cx: &mut EvCx) -> Res {
+        let vis = self.visible();
+        let Some(pos) = vis.iter().position(|i| self.nodes[*i].path == arg) else { return Res::Ignored };
+        let before = self.cursor;
+        self.cursor = pos;
+        let n = &self.nodes[vis[pos]];
+        let folder = n.folder;
+        let path = n.path.clone();
+        let res = match action {
+            "toggle" if folder => {
+                if !self.open.remove(&path) {
+                    self.open.insert(path);
+                }
+                Res::Handled
+            }
+            "activate" if !folder => Res::Activate,
+            "select" | "activate" | "toggle" => Res::Handled,
+            _ => return Res::Ignored,
+        };
+        let res = if res == Res::Handled && self.cursor != before { Res::Changed } else { res };
+        match res {
+            Res::Changed => self.report(cx, "change"),
+            Res::Activate => self.report(cx, "activate"),
+            _ => {}
+        }
+        res
+    }
+
     fn draw(&mut self, c: &mut Canvas, r: Rect, cx: &Cx) {
         self.sync(cx);
         if r.w < 1 || r.h < 1 {
@@ -296,6 +336,18 @@ impl Dropdown {
 }
 
 impl Widget for Dropdown {
+    fn describe(&self, cx: &Cx) -> String {
+        let items: Vec<String> = self.items.iter().map(|x| jstr(x)).collect();
+        format!("{{\"items\":[{}],\"sel\":{},\"label\":{}}}", items.join(","), self.sel, jstr(&cx.text_attr("label", "")))
+    }
+
+    fn act(&mut self, action: &str, arg: &str, cx: &mut EvCx) -> Res {
+        match (action, arg.parse::<usize>()) {
+            ("select" | "activate", Ok(i)) if i < self.items.len() => self.pick(i, cx),
+            _ => Res::Ignored,
+        }
+    }
+
     fn draw(&mut self, c: &mut Canvas, r: Rect, cx: &Cx) {
         self.items = cx.items();
         if !cx.focused {
@@ -506,6 +558,48 @@ impl Table {
 }
 
 impl Widget for Table {
+    fn describe(&self, _cx: &Cx) -> String {
+        let cols: Vec<String> = self.cols.iter().map(|c| jstr(c)).collect();
+        let rows: Vec<String> = self.order.iter().map(|&i| format!("[{}]", self.rows[i].iter().map(|c| jstr(c)).collect::<Vec<_>>().join(","))).collect();
+        let num: Vec<String> = self.numeric.iter().map(|b| b.to_string()).collect();
+        let sort = match self.sort {
+            Some((c, d)) => format!("[{c},{d}]"),
+            None => "null".into(),
+        };
+        format!("{{\"cols\":[{}],\"rows\":[{}],\"numeric\":[{}],\"cursor\":{},\"sort\":{}}}", cols.join(","), rows.join(","), num.join(","), self.cursor, sort)
+    }
+
+    fn act(&mut self, action: &str, arg: &str, cx: &mut EvCx) -> Res {
+        match (action, arg.parse::<usize>()) {
+            ("select" | "activate", Ok(pos)) if pos < self.order.len() => {
+                let changed = pos != self.cursor;
+                self.cursor = pos;
+                if action == "activate" {
+                    self.report(cx, "activate");
+                    Res::Activate
+                } else if changed {
+                    self.report(cx, "change");
+                    Res::Changed
+                } else {
+                    Res::Handled
+                }
+            }
+            ("sort", Ok(col)) if col < self.cols.len() => {
+                self.col = col;
+                self.sort = match self.sort {
+                    Some((c, false)) if c == col => Some((col, true)),
+                    Some((c, true)) if c == col => None,
+                    _ => Some((col, false)),
+                };
+                let keep = self.order.get(self.cursor).copied();
+                self.resort();
+                self.cursor = keep.and_then(|k| self.order.iter().position(|i| *i == k)).unwrap_or(0);
+                Res::Handled
+            }
+            _ => Res::Ignored,
+        }
+    }
+
     fn draw(&mut self, c: &mut Canvas, r: Rect, cx: &Cx) {
         self.sync(cx);
         if r.w < 1 || r.h < 1 || self.cols.is_empty() {

@@ -1,0 +1,35 @@
+# every widget in one place; the browser shows it as an app, the terminal as a grid
+col
+  buttonbar id=tabs items="overview,data,files" icons="home,chart,folder" active=tab
+  pages bind=tab
+    col
+      row
+        panel title="CPU" icon=cpu size=fill
+          gauge bind=cpu label=cpu
+          linechart values="2,5,3,8,6,9,4,7,5,10,8,6,9,12,7" size=4
+        panel title="Memory" icon=bolt size=fill
+          zonebar values="6,3,1" labels="used,cache,free" legend=1
+          segbar values="3,2" total=8 suffix="5 / 8 GB"
+      panel title="Load" icon=chart
+        progressbar name=load bind=cpu max=100
+        graph values="2,5,3,8,6,9,4,7,5,10,8,6" max=10 size=3
+      row
+        clock format=hms
+        timer mode=up label="build"
+        spinner text="indexing"
+    col
+      row
+        panel title="Pie" size=fill
+          piebar values="4,3,2,1" labels="a,b,c,d"
+        panel title="Bars" size=fill
+          barchart values="3,7,4,9,5" labels="mon,tue,wed,thu,fri" show=1
+        panel title="Heat" size=fill
+          heatgrid values="1,3,2,5,8,4,9,2,6,7,3,1" cols=4
+      table id=procs columns="name,cpu,mem" rows="init,0.1,12;firefox,34.5,810;emacs,2.2,120;lazyui,0.4,18"
+    col
+      searchbar id=q prompt="> " bind=query
+      row
+        list id=files items="alpha,beta,gamma,delta,epsilon,zeta" filter=query icon=file
+        tree id=t items="src/main.rs,src/ui.rs,src/web/mod.rs,web/skin.js,README.md" open=1
+      dropdown id=theme label="Theme" items="auto,light,dark" bind=pick
+  keybar hints="tab:focus;ctrl-q:quit"

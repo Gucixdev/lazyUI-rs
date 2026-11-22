@@ -3,7 +3,7 @@
 use crate::canvas::{str_width, Canvas, Rect, Style};
 use crate::input::{Event, Key, MouseKind};
 use crate::native::{Cx, Def, EvCx, Pure, Widget};
-use crate::ui::Value;
+use crate::ui::{jstr, Value};
 use crate::widgets::Res;
 
 pub static DEFS: &[Def] = &[
@@ -94,6 +94,33 @@ pub fn mmss(secs: f64) -> String {
 }
 
 impl Widget for Timer {
+    fn describe(&self, cx: &Cx) -> String {
+        format!("{{\"text\":{},\"running\":{},\"done\":{},\"label\":{}}}", jstr(&mmss(self.shown())), self.running, self.done, jstr(&cx.text_attr("label", "")))
+    }
+
+    fn act(&mut self, action: &str, _arg: &str, cx: &mut EvCx) -> Res {
+        match action {
+            "toggle" | "activate" => {
+                if self.done {
+                    self.elapsed = 0.0;
+                    self.done = false;
+                }
+                self.running = !self.running;
+                cx.emit(if self.running { "start" } else { "stop" }, "", -1, self.shown());
+                Res::Handled
+            }
+            "reset" => {
+                self.elapsed = 0.0;
+                self.done = false;
+                self.running = false;
+                self.last_whole = -1;
+                cx.emit("reset", "", -1, 0.0);
+                Res::Handled
+            }
+            _ => Res::Ignored,
+        }
+    }
+
     fn draw(&mut self, c: &mut Canvas, r: Rect, cx: &Cx) {
         self.down = cx.attr("mode") != Some("up");
         self.total = cx.num_attr("seconds", 60.0).max(0.0);

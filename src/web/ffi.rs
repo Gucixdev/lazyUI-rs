@@ -156,6 +156,25 @@ pub extern "C" fn lz_events() -> usize {
     })
 }
 
+/// The tree for a skin that lays things out itself, as JSON in the out buffer (`lz_out_ptr`/`lz_out_len`).
+#[no_mangle]
+pub extern "C" fn lz_describe() -> usize {
+    let d = with(|w| w.describe(), "null".to_string());
+    OUT.with(|o| {
+        *o.borrow_mut() = d.into_bytes();
+        o.borrow().len()
+    })
+}
+
+/// A semantic action on an element: focus, select, activate, toggle, text, sort, reset.
+///
+/// # Safety
+/// Each pointer/length pair is readable UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn lz_act(ip: *const u8, inn: usize, ap: *const u8, an: usize, gp: *const u8, gn: usize) -> i32 {
+    with(|w| w.act(s(ip, inn), s(ap, an), s(gp, gn)) as i32, 0)
+}
+
 #[no_mangle]
 pub extern "C" fn lz_error() -> usize {
     ERR.with(|e| OUT.with(|o| {

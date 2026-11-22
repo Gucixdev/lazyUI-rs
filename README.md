@@ -148,3 +148,16 @@ Kitty keyboard protocol, tree/dropdown/scroll containers, the lazytui bars (ring
 (smooth progress, rounded rects, proportional fonts), touch/IME input in the web page, `lazyui serve`. See `DESIGN.md` for the honest list.
 
 MIT.
+
+## Web skins
+
+Two ways to show the same engine in a browser tab, picked by what you mount:
+
+- `mount(canvas, ...)` in `web/lazyui.js`: the character grid, looks like the terminal.
+- `mountSkin(div, ...)` in `web/skin.js`: a DOM app - cards, segmented controls, SVG charts, icons, light and dark
+  (`scheme`), `flavor: "mac"` or `"win"`. The engine still owns state, focus, keys and events; the skin reads
+  `lz_describe` (the active elements with attributes and live state, widgets add their own data through
+  `Widget::describe`) and sends semantic actions back with `lz_act` (`focus select activate text toggle sort reset`).
+
+`web/index.html` takes `?skin=grid`, `?flavor=`, `?scheme=`, `?spec=`, `?set=key=value`. `examples/showcase.lui` has every
+widget. `node web/browser-test.mjs` drives the skin in headless Chromium (no npm packages).

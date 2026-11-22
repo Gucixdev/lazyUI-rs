@@ -3,22 +3,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>lazyui</title>
 <style>
-  html, body { height: 100%; margin: 0; background: #0b0f0c; color: #cde6cd; }
+  html, body { height: 100%; margin: 0; }
+  body.grid { background: #0b0f0c; color: #cde6cd; }
   canvas { display: block; width: 100vw; height: 100vh; }
-  #err { position: fixed; inset: 1rem; color: #f14c4c; font: 14px monospace; white-space: pre-wrap; }
+  #app { height: 100vh; }
+  #err { position: fixed; inset: 1rem; color: #f14c4c; font: 14px monospace; white-space: pre-wrap; pointer-events: none; }
 </style>
-<canvas id="ui"></canvas>
+<div id="app"></div>
 <div id="err"></div>
 <script type="module">
-  import { mount } from "./lazyui.js";
+  // ?skin=grid is the character-grid canvas (looks like the terminal); the default is the app-like DOM skin.
+  // ?flavor=mac|win  ?scheme=light|dark|auto  ?spec=file.lui  ?theme=green (grid only)
   const q = new URLSearchParams(location.search);
   try {
     const spec = await (await fetch(q.get("spec") || "demo.lui")).text();
-    const ui = await mount(document.getElementById("ui"), { wasm: "lazyui.wasm", spec, theme: q.get("theme") || undefined });
+    let ui;
+    if (q.get("skin") === "grid") {
+      const { mount } = await import("./lazyui.js");
+      document.body.className = "grid";
+      const canvas = document.createElement("canvas");
+      document.getElementById("app").replaceWith(canvas);
+      ui = await mount(canvas, { wasm: "lazyui.wasm", spec, theme: q.get("theme") || undefined });
+      canvas.focus();
+    } else {
+      const { mountSkin } = await import("./skin.js");
+      ui = await mountSkin(document.getElementById("app"), { wasm: "lazyui.wasm", spec, flavor: q.get("flavor") || undefined, scheme: q.get("scheme") || "auto" });
+    }
     window.lazyui = ui;
     ui.set("cpu", 42);
+    for (const kv of q.getAll("set")) { const [k, v] = kv.split("="); ui.set(k, v); } // ?set=tab=1
     ui.on((e) => console.log("lazyui event", e));
-    ui.canvas = document.getElementById("ui");
-    ui.canvas.focus();
+    // ?click=CSS-selector (repeatable) clicks elements after load: for screenshots and smoke tests
+    for (const sel of q.getAll("click")) { await new Promise((r) => setTimeout(r, 50)); document.querySelector(sel)?.click(); }
   } catch (e) { document.getElementById("err").textContent = String(e); }
 </script>

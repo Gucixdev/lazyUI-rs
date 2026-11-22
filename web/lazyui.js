@@ -29,16 +29,29 @@ const KEYS = { Enter: "enter", Tab: "tab", Escape: "esc", Backspace: "backspace"
   ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Home: "home", End: "end",
   PageUp: "pgup", PageDown: "pgdn" };
 
-export async function mount(canvas, o = {}) {
+/// The wasm engine without any painting: shared by the grid skin (`mount`) and the DOM skin (`skin.js`).
+export async function engine(o = {}) {
   const enc = new TextEncoder(), dec = new TextDecoder();
   const bytes = await (await fetch(o.wasm || "lazyui.wasm")).arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const x = instance.exports;
   const mem = () => new Uint8Array(x.memory.buffer);
-
   const put = (s) => { const b = enc.encode(s); const p = x.lz_alloc(b.length); mem().set(b, p); return [p, b.length]; };
   const call = (f, s, ...rest) => { const [p, n] = put(s); try { return f(p, n, ...rest); } finally { x.lz_free(p, n); } };
-  const err = () => { const n = x.lz_error(); return dec.decode(mem().subarray(x.lz_out_ptr(), x.lz_out_ptr() + n)); };
+  const read = (n) => dec.decode(mem().slice(x.lz_out_ptr(), x.lz_out_ptr() + n));
+  const err = () => read(x.lz_error());
+  for (const [name, text] of Object.entries(o.widgets || {})) {
+    const [a, an] = put(name), [b, bn] = put(text);
+    const ok = x.lz_widget(a, an, b, bn); x.lz_free(a, an); x.lz_free(b, bn);
+    if (ok !== 1) throw new Error(`lazyui widget ${name}: ` + err());
+  }
+  if (call(x.lz_init, o.spec || "text text=\"no spec\"") !== 1) throw new Error("lazyui spec: " + err());
+  if (o.theme) call(x.lz_theme, o.theme);
+  return { x, put, call, read, err, mem, dec };
+}
+
+export async function mount(canvas, o = {}) {
+  const { x, put, call, err, mem, dec } = await engine(o);
 
   const font = o.font || "ui-monospace, 'DejaVu Sans Mono', Menlo, Consolas, monospace";
   const px = o.fontSize || 16;
@@ -64,13 +77,6 @@ export async function mount(canvas, o = {}) {
     paintAll = true;
   }
 
-  for (const [name, text] of Object.entries(o.widgets || {})) {
-    const [a, an] = put(name), [b, bn] = put(text);
-    const ok = x.lz_widget(a, an, b, bn); x.lz_free(a, an); x.lz_free(b, bn);
-    if (ok !== 1) throw new Error(`lazyui widget ${name}: ` + err());
-  }
-  if (call(x.lz_init, o.spec || "text text=\"no spec\"") !== 1) throw new Error("lazyui spec: " + err());
-  if (o.theme) call(x.lz_theme, o.theme);
   metrics();
   if (!canvas.hasAttribute("tabindex")) canvas.tabIndex = 0;
   canvas.style.outline = "none";

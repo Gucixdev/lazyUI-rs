@@ -46,6 +46,8 @@ pub fn tree(ui: &mut Ui, w: i32, h: i32) -> String {
 /// snap              # print the settled frame
 /// tree              # print the tree JSON
 /// events            # print and clear the event queue as JSON lines
+/// act files select 2   # a semantic action as the DOM skin sends it (focus select activate text toggle sort reset)
+/// describe          # print the skin tree JSON
 /// expect text "50%"          # frame contains
 /// expect no-text "error"
 /// expect event q change ab   # in the event queue (text optional); consumed
@@ -131,6 +133,19 @@ pub fn run_script(ui: &mut Ui, script: &str) -> Result<String, String> {
                 if !ui.focus(id) {
                     return Err(fail(format!("no focusable element `{id}`")));
                 }
+            }
+            "act" => {
+                let id = args.first().ok_or_else(|| fail("act ID ACTION [ARG]".into()))?;
+                let action = args.get(1).ok_or_else(|| fail("act ID ACTION [ARG]".into()))?;
+                relayout_if_needed(ui, w, h);
+                if !ui.act(id, action, args.get(2).map(|s| s.as_str()).unwrap_or("")) {
+                    return Err(fail(format!("`{id}` did not take `{action}`")));
+                }
+            }
+            "describe" => {
+                settle(ui, w, h, 10.0);
+                out.push_str(&ui.describe_json());
+                out.push('\n');
             }
             "snap" => {
                 out.push_str(&snapshot(ui, w, h));
@@ -286,5 +301,24 @@ mod tests {
         let o = run_script(&mut ui, "size 30 6\ntype a\ntree\nevents\n").unwrap();
         assert!(o.contains("\"kind\":\"searchbar\"") && o.contains("\"value\":\"a\""), "{o}");
         assert!(o.contains("{\"id\":\"q\",\"kind\":\"change\",\"text\":\"a\""), "{o}");
+    }
+}
+
+#[cfg(test)]
+mod skin_tests {
+    use super::*;
+
+    #[test]
+    fn describe_and_act_drive_the_ui_without_a_grid() {
+        let spec = "col\n  searchbar id=q bind=query\n  list id=files items=\"alpha,beta,gamma\" filter=query\n  tree id=t items=\"a/x,a/y,b\"\n  dropdown id=d items=\"red,green\" bind=pick\n  table id=tb columns=\"n,v\" rows=\"a,2;b,1\"\n";
+        let mut ui = Ui::from_spec(spec).unwrap();
+        let o = run_script(&mut ui, "size 40 24\ndescribe\nact q text ga\nexpect model query ga\nact files activate 0\nexpect event files activate gamma\nact d select 1\nexpect model pick 1\nact t toggle a\nact tb sort 1\ndescribe\n").unwrap();
+        let first = o.lines().next().unwrap();
+        assert!(first.contains("\"kind\":\"tree\"") && first.contains("\"nodes\":[") && first.contains("\"cols\":[\"n\",\"v\"]"), "{first}");
+        let last = o.lines().last().unwrap();
+        // sorted by the second column ascending: b (1) before a (2)
+        assert!(last.find("\"b\",\"1\"").unwrap() < last.find("\"a\",\"2\"").unwrap(), "{last}");
+        assert!(last.contains("\"path\":\"a/x\""), "the folder opened: {last}");
+        assert!(run_script(&mut ui, "act nope select 1").is_err());
     }
 }

@@ -121,6 +121,22 @@ pub trait Widget {
     fn event(&mut self, _r: Rect, _ev: &Event, _cx: &mut EvCx) -> Res {
         Res::Ignored
     }
+    /// What a web skin needs to draw this widget as HTML/SVG: a JSON object. The default carries the element's own data.
+    fn describe(&self, cx: &Cx) -> String {
+        let nums: Vec<String> = cx.series().iter().map(|x| format!("{x}")).collect();
+        let items: Vec<String> = cx.items().iter().map(|x| crate::ui::jstr(x)).collect();
+        format!(
+            "{{\"series\":[{}],\"value\":{},\"items\":[{}],\"text\":{}}}",
+            nums.join(","),
+            cx.value(),
+            items.join(","),
+            crate::ui::jstr(&cx.attr("bind").and_then(|k| cx.model_text(k)).unwrap_or_default())
+        )
+    }
+    /// A semantic action from a skin that has no character grid: `select`, `activate`, `toggle`... with one argument.
+    fn act(&mut self, _action: &str, _arg: &str, _cx: &mut EvCx) -> Res {
+        Res::Ignored
+    }
     /// Time passed (virtual clock). May emit events and set bound keys, like a key press.
     fn tick(&mut self, _dt: f64, _cx: &mut EvCx) {}
     /// Drawn after everything else, so a popup can lie over its neighbours.

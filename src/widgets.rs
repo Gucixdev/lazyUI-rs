@@ -125,6 +125,10 @@ impl List {
     pub fn selected(&self) -> Option<usize> {
         self.shown.get(self.cursor).copied()
     }
+    /// The rows that pass the filter, in order.
+    pub fn shown_items(&self) -> Vec<&str> {
+        self.shown.iter().map(|&i| self.items[i].as_str()).collect()
+    }
     pub fn selected_text(&self) -> Option<&str> {
         self.selected().map(|i| self.items[i].as_str())
     }

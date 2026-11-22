@@ -7,7 +7,7 @@
 //! Colour words: 0 = the page default, `0x01000000 | n` = palette index n, `0x02000000 | 0xRRGGBB` = true colour.
 
 use crate::canvas::{Canvas, Caps, Color};
-use crate::components::{Scope, Widgets};
+use crate::components::Widgets;
 use crate::input::{parse_key, Event, Mods, MouseKind};
 use crate::theme::Theme;
 use crate::ui::Ui;
@@ -112,6 +112,20 @@ impl Web {
             self.ui.tick(d);
             left -= d;
         }
+    }
+
+    /// The tree for a skin that lays things out itself (see `Ui::describe_json`). Draws once into a scratch grid so every
+    /// widget has its state; the size only decides what the widgets scroll to, not the layout.
+    pub fn describe(&mut self) -> String {
+        self.sync();
+        let mut c = Canvas::new(self.w.max(80), self.h.max(24), Caps::FULL);
+        self.ui.render(&mut c);
+        self.ui.describe_json()
+    }
+
+    pub fn act(&mut self, id: &str, action: &str, arg: &str) -> bool {
+        self.sync();
+        self.ui.act(id, action, arg)
     }
 
     pub fn set(&mut self, key: &str, value: &str) {

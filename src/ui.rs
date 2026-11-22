@@ -1014,6 +1014,169 @@ impl Ui {
             .collect()
     }
 
+    /// Everything a skin with its own layout needs: the active elements in tree order with all attributes and live state.
+    /// Call after `render` (state is created while drawing). `focused` marks the element that takes keys.
+    pub fn describe_json(&self) -> String {
+        fn node(ui: &Ui, i: usize, out: &mut String) {
+            let p = &ui.placed[i];
+            let Some(el) = Ui::el_at(&ui.root, &p.path) else { return };
+            out.push_str(&format!("{{\"id\":{},\"kind\":{}", jstr(&p.id), jstr(p.kind.name())));
+            if ui.focus.as_deref() == Some(p.id.as_str()) {
+                out.push_str(",\"focused\":true");
+            }
+            let mut keys: Vec<&String> = el.attrs.keys().collect();
+            keys.sort();
+            out.push_str(",\"attrs\":{");
+            for (n, k) in keys.iter().enumerate() {
+                if n > 0 {
+                    out.push(',');
+                }
+                out.push_str(&format!("{}:{}", jstr(k), jstr(&el.attrs[*k])));
+            }
+            out.push_str("},\"st\":");
+            match (p.kind, ui.states.get(&p.id)) {
+                (Kind::Text, _) => out.push_str(&format!("{{\"text\":{}}}", jstr(&ui.bound_text(el, "text")))),
+                (Kind::Progress, _) => {
+                    let max = el.attr("max").and_then(|s| s.parse::<f64>().ok()).filter(|m| *m > 0.0).unwrap_or(1.0);
+                    let raw = match el.attr("bind") {
+                        Some(k) => ui.number(k),
+                        None => el.attr("value").and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                    };
+                    let v = if raw.is_finite() { (raw / max).clamp(0.0, 1.0) } else { 0.0 };
+                    let label = el.attr("label").map(|l| l.to_string()).unwrap_or_else(|| format!("{}%", (v * 100.0).round() as i32));
+                    out.push_str(&format!("{{\"v\":{},\"label\":{}}}", jnum(v), jstr(&label)));
+                }
+                (Kind::List, Some(WState::List(l, _))) => {
+                    let items: Vec<String> = l.shown_items().iter().map(|s| jstr(s)).collect();
+                    out.push_str(&format!("{{\"items\":[{}],\"cursor\":{}}}", items.join(","), l.cursor));
+                }
+                (Kind::Search, Some(WState::Input(inp))) => out.push_str(&format!("{{\"value\":{}}}", jstr(&inp.text))),
+                (Kind::Buttons, Some(WState::Buttons(b, _))) => {
+                    let items: Vec<String> = b.labels.iter().map(|s| jstr(s)).collect();
+                    let active = b.active.map(|a| a.to_string()).unwrap_or_else(|| "null".into());
+                    out.push_str(&format!("{{\"items\":[{}],\"cursor\":{},\"active\":{}}}", items.join(","), b.cursor, active));
+                }
+                (Kind::Custom(_), Some(WState::Custom(w))) => {
+                    let focused = ui.focus.as_deref() == Some(p.id.as_str());
+                    let cx = crate::native::Cx { el, theme: &ui.theme, model: &ui.model, focused, unicode: true, time: ui.clock };
+                    out.push_str(&w.describe(&cx));
+                }
+                _ => out.push_str("{}"),
+            }
+            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed[j].parent == Some(i)).collect();
+            if !kids.is_empty() {
+                out.push_str(",\"kids\":[");
+                for (n, k) in kids.iter().enumerate() {
+                    if n > 0 {
+                        out.push(',');
+                    }
+                    node(ui, *k, out);
+                }
+                out.push(']');
+            }
+            out.push('}');
+        }
+        let mut s = String::new();
+        if self.placed.is_empty() {
+            return "null".into();
+        }
+        node(self, 0, &mut s);
+        s
+    }
+
+    /// A semantic action from a skin that lays things out itself: `focus`, `select`, `activate`, `text`, `toggle`...
+    /// True when the element took it.
+    pub fn act(&mut self, id: &str, action: &str, arg: &str) -> bool {
+        let Some(p) = self.placed.iter().find(|p| p.id == id).cloned() else { return false };
+        if p.kind.focusable() && self.focus.as_deref() != Some(id) {
+            self.focus = Some(id.to_string());
+            self.dirty = true;
+        }
+        if action == "focus" {
+            return p.kind.focusable();
+        }
+        let Some(el) = Ui::el_at(&self.root, &p.path).cloned() else { return false };
+        let mut out: Vec<UiEvent> = Vec::new();
+        let mut set_model: Vec<(String, Value)> = Vec::new();
+        let done = match (self.states.get_mut(id), p.kind) {
+            (Some(WState::List(l, _)), Kind::List) => match (action, arg.parse::<usize>()) {
+                ("select" | "activate", Ok(i)) if i < l.len() => {
+                    let changed = l.cursor != i;
+                    l.cursor = i;
+                    let txt = l.selected_text().unwrap_or("").to_string();
+                    let mk = |kind: &str| {
+                        let mut e = UiEvent::new(id, kind);
+                        e.text = txt.clone();
+                        e.index = i as i64;
+                        e.number = i as f64;
+                        e
+                    };
+                    if changed {
+                        out.push(mk("change"));
+                        if let Some(k) = el.attr("bind") {
+                            set_model.push((k.to_string(), Value::Num(i as f64)));
+                        }
+                    }
+                    if action == "activate" {
+                        out.push(mk("activate"));
+                    }
+                    true
+                }
+                _ => false,
+            },
+            (Some(WState::Input(inp)), Kind::Search) => match action {
+                "text" => {
+                    inp.set(arg);
+                    let mut e = UiEvent::new(id, "change");
+                    e.text = inp.text.clone();
+                    out.push(e);
+                    if let Some(k) = el.attr("bind") {
+                        set_model.push((k.to_string(), Value::Text(inp.text.clone())));
+                    }
+                    true
+                }
+                "activate" => {
+                    let mut e = UiEvent::new(id, "activate");
+                    e.text = inp.text.clone();
+                    out.push(e);
+                    true
+                }
+                _ => false,
+            },
+            (Some(WState::Buttons(b, _)), Kind::Buttons) => match (action, arg.parse::<usize>()) {
+                ("select" | "activate", Ok(i)) if i < b.labels.len() => {
+                    b.cursor = i;
+                    let mut e = UiEvent::new(id, "activate");
+                    e.index = i as i64;
+                    e.number = i as f64;
+                    e.text = b.labels[i].clone();
+                    out.push(e);
+                    if let Some(k) = el.attr("active") {
+                        set_model.push((k.to_string(), Value::Num(i as f64)));
+                    }
+                    true
+                }
+                _ => false,
+            },
+            (Some(WState::Custom(w)), Kind::Custom(_)) => {
+                let mut cx = crate::native::EvCx { el: &el, id, model: &self.model, out: Vec::new(), set: Vec::new() };
+                let res = w.act(action, arg, &mut cx);
+                out.extend(cx.out);
+                set_model.extend(cx.set);
+                res != Res::Ignored
+            }
+            _ => false,
+        };
+        for (k, v) in set_model {
+            self.put(&k, v);
+        }
+        self.events.extend(out);
+        if done {
+            self.dirty = true;
+        }
+        done
+    }
+
     /// The element tree as JSON: what an agent or a test reads instead of looking at pixels.
     pub fn tree_json(&self) -> String {
         fn node(ui: &Ui, i: usize, out: &mut String) {
