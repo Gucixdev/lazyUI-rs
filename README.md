@@ -89,6 +89,14 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 `theme` data themes, `input` byte decoder (utf-8, CSI, SGR mouse, paste), `widgets`, `ui` tree + spec + model + focus,
 `headless`, `term` raw mode via libc, `runtime` the loop.
 
+## Native widgets
+
+Charts and the like need code, so they are Rust, registered by name (`lazyui widgets ls` lists them with their attributes).
+Data comes from `values="1,2,3"` or `bind=KEY` (a comma list in the model; `ui.push(key, sample, cap)` appends and
+keeps the newest `cap`). Done: `graph barchart histogram zonebar piebar segbar gauge ringbar spinner`. They draw with
+block/braille glyphs on a Unicode terminal and with `# = . :` on an ASCII one, so a snapshot is the same everywhere.
+`ringbar` and `spinner` move with the Ui clock (`tick`), never the wall clock.
+
 ## Shared widgets
 
 A widget is a spec file with parameters, used by its file name:

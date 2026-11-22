@@ -420,7 +420,7 @@ fn push16(out: &mut String, n: u8, fg: bool) {
     }
 }
 
-fn idx_rgb(n: u8) -> (u8, u8, u8) {
+pub fn idx_rgb(n: u8) -> (u8, u8, u8) {
     if n < 16 {
         return ANSI16[n as usize];
     }

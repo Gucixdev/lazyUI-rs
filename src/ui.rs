@@ -13,6 +13,8 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
+    /// a native widget from `native::find` (charts, pickers...), by its registered name
+    Custom(&'static str),
     Row,
     Col,
     Panel,
@@ -40,7 +42,7 @@ impl Kind {
             "buttonbar" => Kind::Buttons,
             "list" => Kind::List,
             "keybar" => Kind::Keybar,
-            _ => return None,
+            other => return crate::native::find(other).map(|d| Kind::Custom(d.name)),
         })
     }
     pub fn name(self) -> &'static str {
@@ -56,16 +58,23 @@ impl Kind {
             Kind::Buttons => "buttonbar",
             Kind::List => "list",
             Kind::Keybar => "keybar",
+            Kind::Custom(n) => n,
         }
     }
     fn container(self) -> bool {
         matches!(self, Kind::Row | Kind::Col | Kind::Panel | Kind::Pages)
     }
     fn focusable(self) -> bool {
-        matches!(self, Kind::Search | Kind::Buttons | Kind::List)
+        match self {
+            Kind::Custom(n) => crate::native::find(n).is_some_and(|d| d.focus),
+            _ => matches!(self, Kind::Search | Kind::Buttons | Kind::List),
+        }
     }
     fn one_row(self) -> bool {
-        matches!(self, Kind::Text | Kind::Progress | Kind::Search | Kind::Buttons | Kind::Keybar)
+        match self {
+            Kind::Custom(n) => crate::native::find(n).is_some_and(|d| d.rows == Some(1)),
+            _ => matches!(self, Kind::Text | Kind::Progress | Kind::Search | Kind::Buttons | Kind::Keybar),
+        }
     }
 }
 
@@ -167,7 +176,7 @@ fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::compon
             return Err(format!("{n}: expected an element kind first, got `{kind_s}`"));
         }
         let kind = Kind::parse(kind_s).ok_or_else(|| {
-            let known = ["ringbar", "zonebar", "pacmanbar", "dropdown", "tree", "scroll", "rain", "custom", "stack"];
+            let known = ["pacmanbar", "dropdown", "tree", "scroll", "rain", "custom", "stack"];
             if known.contains(&kind_s.as_str()) {
                 format!("{n}: `{kind_s}` exists in lazytui (C) but not in lazyui yet")
             } else {
@@ -276,7 +285,7 @@ pub struct UiEvent {
 }
 
 impl UiEvent {
-    fn new(id: &str, kind: &str) -> UiEvent {
+    pub(crate) fn new(id: &str, kind: &str) -> UiEvent {
         UiEvent { id: id.into(), kind: kind.into(), text: String::new(), index: -1, number: 0.0 }
     }
     pub fn to_json(&self) -> String {
@@ -314,6 +323,7 @@ enum WState {
     List(List, String),
     Input(Input),
     Buttons(Buttons, String),
+    Custom(Box<dyn crate::native::Widget>),
 }
 
 #[derive(Clone, Debug)]
@@ -338,6 +348,7 @@ pub struct Ui {
     events: Vec<UiEvent>,
     hotkeys: Vec<(Key, Mods, String)>,
     every: Vec<(f64, f64, String)>,
+    clock: f64,
     pub quit: bool,
     pub dirty: bool,
 }
@@ -357,6 +368,7 @@ impl Ui {
             events: Vec::new(),
             hotkeys: Vec::new(),
             every: Vec::new(),
+            clock: 0.0,
             quit: false,
             dirty: true,
         }
@@ -413,6 +425,17 @@ impl Ui {
             Some(Value::Num(n)) => fmt_num(*n),
             None => String::new(),
         }
+    }
+    /// Append a sample to a comma separated series in the model (a graph's data), keeping the newest `cap`.
+    pub fn push(&mut self, key: &str, v: f64, cap: usize) {
+        if !v.is_finite() {
+            return;
+        }
+        let mut xs = crate::gfx::numbers(&self.text_of(key));
+        xs.push(v);
+        let from = xs.len().saturating_sub(cap.max(1));
+        let t: Vec<String> = xs[from..].iter().map(|x| fmt_num(*x)).collect();
+        self.set_text(key, &t.join(","));
     }
     pub fn has(&self, key: &str) -> bool {
         self.model.contains_key(key)
@@ -490,11 +513,20 @@ impl Ui {
         if !dt.is_finite() || dt < 0.0 {
             return;
         }
+        self.clock += dt;
         for s in self.springs.values_mut() {
             if !s.at_rest() {
                 s.step(dt);
                 self.dirty = true;
             }
+        }
+        for st in self.states.values_mut() {
+            if let WState::Custom(w) = st {
+                w.tick(dt);
+            }
+        }
+        if self.live() {
+            self.dirty = true;
         }
         let mut fired = Vec::new();
         for (period, acc, name) in &mut self.every {
@@ -508,8 +540,17 @@ impl Ui {
             self.emit("app", &name, "", 0.0);
         }
     }
+    /// Something is still moving towards a resting picture (springs, widgets easing): a snapshot waits for this to end.
+    pub fn settling(&self) -> bool {
+        self.springs.values().any(|s| !s.at_rest()) || self.states.values().any(|s| matches!(s, WState::Custom(w) if w.animating()))
+    }
+    /// A widget on screen changes with time alone (a spinner): the loop has to keep drawing, but nothing "settles".
+    pub fn live(&self) -> bool {
+        self.placed.iter().any(|p| matches!(p.kind, Kind::Custom(n) if crate::native::find(n).is_some_and(|d| d.live)))
+    }
+    /// The loop needs frames: settling or live.
     pub fn animating(&self) -> bool {
-        self.springs.values().any(|s| !s.at_rest())
+        self.settling() || self.live()
     }
     /// Seconds until the next periodic event, if there is one.
     pub fn next_deadline(&self) -> Option<f64> {
@@ -718,6 +759,15 @@ impl Ui {
                     l.draw(c, r, &t, focused);
                 }
             }
+            Kind::Custom(name) => {
+                let Some(def) = crate::native::find(name) else { return };
+                let focused = self.focus.as_deref() == Some(p.id.as_str());
+                let st = self.states.entry(p.id.clone()).or_insert_with(|| WState::Custom((def.make)()));
+                if let WState::Custom(w) = st {
+                    let cx = crate::native::Cx { el, theme: &t, model: &self.model, focused, unicode: c.caps.unicode, time: self.clock };
+                    w.draw(c, r, &cx);
+                }
+            }
             Kind::Keybar => {
                 let hints: Vec<(String, String)> = el
                     .attr("hints")
@@ -878,6 +928,13 @@ impl Ui {
                 }
                 res
             }
+            (Some(WState::Custom(w)), Kind::Custom(_)) => {
+                let mut cx = crate::native::EvCx { el: &el, id, model: &self.model, out: Vec::new(), set: Vec::new() };
+                let res = w.event(p.rect, ev, &mut cx);
+                out.extend(cx.out);
+                set_model.extend(cx.set);
+                res
+            }
             _ => Res::Ignored,
         };
         for (k, v) in set_model {
@@ -955,7 +1012,7 @@ impl Ui {
                 }
                 Some(WState::Input(inp)) => out.push_str(&format!(",\"value\":{}", jstr(&inp.text))),
                 Some(WState::Buttons(b, _)) => out.push_str(&format!(",\"items\":[{}],\"cursor\":{}", b.labels.iter().map(|l| jstr(l)).collect::<Vec<_>>().join(","), b.cursor)),
-                None => {}
+                Some(WState::Custom(_)) | None => {}
             }
             if let Some(s) = ui.springs.get(&p.id) {
                 out.push_str(&format!(",\"value\":{}", jnum((s.target * 1000.0).round() / 1000.0)));
@@ -1044,7 +1101,7 @@ col
     #[test]
     fn spec_errors_carry_the_line() {
         assert_eq!(parse_spec("col\n  wat\n").unwrap_err(), "line 2: unknown element `wat`");
-        assert_eq!(parse_spec("col\n  ringbar\n").unwrap_err(), "line 2: `ringbar` exists in lazytui (C) but not in lazyui yet");
+        assert_eq!(parse_spec("col\n  tree\n").unwrap_err(), "line 2: `tree` exists in lazytui (C) but not in lazyui yet");
         assert!(parse_spec("col\n  text text=\"open\n").unwrap_err().starts_with("line 2: a quote"));
         assert!(parse_spec("col\n  text size=big\n").unwrap_err().starts_with("line 2: size"));
         assert!(parse_spec("text\n  text\n").unwrap_err().contains("cannot hold children"));

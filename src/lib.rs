@@ -1,11 +1,14 @@
 pub mod anim;
 pub mod canvas;
+pub mod charts;
 pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;
+pub mod gfx;
 pub mod headless;
 pub mod input;
 pub mod layout;
+pub mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;
 #[cfg(not(target_arch = "wasm32"))]

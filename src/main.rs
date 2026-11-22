@@ -170,6 +170,9 @@ fn widgets_cmd(a: &Args) {
     let (w, problems) = Widgets::standard(Some(&spec_dir), &a.widget_dirs);
     match a.pos.first().map(|s| s.as_str()).unwrap_or("ls") {
         "ls" => {
+            for d in lazyui::native::all() {
+                println!("{:<14} {:<8} {}", d.name, "native", d.doc);
+            }
             for c in w.names() {
                 let params: Vec<String> = Widgets::param_list(c).into_iter().map(|(k, d)| match d { Some(d) => format!("{k}={d}"), None => k }).collect();
                 println!("{:<14} {:<8} {}  [{}]", c.name, c.scope.name(), c.doc, params.join(" "));

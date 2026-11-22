@@ -10,7 +10,7 @@ pub fn settle(ui: &mut Ui, w: i32, h: i32, max: f64) {
     let mut c = Canvas::new(w, h, Caps::ASCII);
     ui.render(&mut c); // springs are created on first render
     let mut t = 0.0;
-    while ui.animating() && t < max {
+    while ui.settling() && t < max {
         ui.tick(1.0 / 60.0);
         ui.render(&mut c);
         t += 1.0 / 60.0;

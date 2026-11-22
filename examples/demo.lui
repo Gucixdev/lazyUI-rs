@@ -1,4 +1,4 @@
-# lazyui demo: tabs, a live bar, a searchable list, a keybar
+# lazyui demo: tabs, a live bar, a searchable list, a keybar, charts on the second page
 col
   buttonbar id=tabs items="main,extras" active=tab
   pages bind=tab
@@ -7,5 +7,11 @@ col
         progressbar name=cpu bind=cpu max=100
       searchbar id=q prompt="> " bind=query
       list id=files items="alpha,beta,gamma,delta,epsilon,zeta" filter=query
-    text text="nothing on this page yet" style=dim
+    col gap=0
+      gauge bind=cpu label=cpu
+      graph values="2,5,3,8,6,9,4,7,5,10,8,6" max=10 size=3
+      zonebar values="6,3,1" labels="used,cache,free" legend=1 size=2
+      barchart values="3,7,4,9,5" labels="a,b,c,d,e" show=1
+      ringbar text="lazyui - one engine, four faces   " speed=6
+      spinner text="working" 
   keybar hints="tab:focus;ctrl-q:quit"

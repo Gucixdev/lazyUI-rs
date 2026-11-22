@@ -137,3 +137,13 @@ that is a composition of existing elements is a file anyone can share. Online sh
 256 KB limit, never overwrites); there is no index or registry server. Gaps: no versioning or checksums of downloaded
 widgets (they are data, but a spec can still show text you did not expect), no `$` escape, values with a double quote
 are refused, a component cannot take attributes for inner elements other than through parameters.
+
+## Native widgets (2026-11-22)
+
+`native.rs`: `trait Widget {draw, event, tick, animating}`, a registry of `Def{name, doc, focus, rows, live, make}` and
+`Kind::Custom(&'static str)`; the Ui keeps one `Box<dyn Widget>` per element id (state survives reloads like the list
+cursor does). A widget reads through `Cx` (attributes, model, theme, clock) and writes through `EvCx` (events, bound
+keys), so it cannot reach the Ui. `live` widgets (spinner) keep the loop drawing without counting as unsettled: the
+headless snapshot waits for `settling()`, the loops use `animating()`. The registry is a static table, not a plugin
+loader: a widget that is not in the crate is a data widget (a file) instead. Gaps: barchart/histogram have no axis frame
+yet, zonebar has no bold ink, colours of `graph` follow one accent shade instead of the theme gradient.
