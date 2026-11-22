@@ -7,14 +7,34 @@
   body.grid { background: #0b0f0c; color: #cde6cd; }
   canvas { display: block; width: 100vw; height: 100vh; }
   #app { height: 100vh; }
+  #dock { position: fixed; right: 12px; bottom: 12px; z-index: 99; display: flex; gap: 4px; padding: 4px; border-radius: 99px; font: 12px system-ui, sans-serif;
+    background: rgba(20,20,24,.72); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+  #dock button { all: unset; cursor: pointer; padding: 5px 11px; border-radius: 99px; color: #cfcfd6; }
+  #dock button:hover { color: #fff; } #dock button.on { background: #fff; color: #111; }
+  #dock .sep { width: 1px; background: rgba(255,255,255,.18); margin: 3px 2px; }
   #err { position: fixed; inset: 1rem; color: #f14c4c; font: 14px monospace; white-space: pre-wrap; pointer-events: none; }
 </style>
 <div id="app"></div>
 <div id="err"></div>
 <script type="module">
   // ?skin=grid is the character-grid canvas (looks like the terminal); the default is the app-like DOM skin.
-  // ?flavor=mac|win  ?scheme=light|dark|auto  ?spec=file.lui  ?theme=green (grid only)
+  // ?look=terminal|classic|flat|modern|glass|neon|aurora  ?scheme=light|dark|auto  ?motion=stiff|snappy|gentle|bouncy|wobbly
+  // ?spec=file.lui  ?dock=0 hides the look switcher  ?flavor=mac|win (old alias)  ?theme=green (grid only)
   const q = new URLSearchParams(location.search);
+  // a floating chip row to flip between looks live: this is how you pick one
+  function dock(ui, now) {
+    const d = document.createElement("div");
+    d.id = "dock";
+    const chips = ui.looks().map((l) => `<button data-look="${l.name}" title="${l.desc}"${l.name === now ? ' class="on"' : ""}>${l.name}</button>`).join("");
+    d.innerHTML = chips + '<span class="sep"></span><button data-scheme="light">light</button><button data-scheme="dark">dark</button>';
+    d.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.look) { ui.look(b.dataset.look); d.querySelectorAll("[data-look]").forEach((x) => x.classList.toggle("on", x === b)); const u = new URL(location); u.searchParams.set("look", b.dataset.look); history.replaceState(0, "", u); }
+      if (b.dataset.scheme) ui.scheme(b.dataset.scheme);
+    });
+    document.body.appendChild(d);
+  }
   try {
     const spec = await (await fetch(q.get("spec") || "demo.lui")).text();
     let ui;
@@ -27,7 +47,8 @@
       canvas.focus();
     } else {
       const { mountSkin } = await import("./skin.js");
-      ui = await mountSkin(document.getElementById("app"), { wasm: "lazyui.wasm", spec, flavor: q.get("flavor") || undefined, scheme: q.get("scheme") || "auto" });
+      ui = await mountSkin(document.getElementById("app"), { wasm: "lazyui.wasm", spec, flavor: q.get("flavor") || undefined, look: q.get("look") || undefined, motion: q.get("motion") || undefined, scheme: q.get("scheme") || "auto" });
+      if (q.get("dock") !== "0") dock(ui, q.get("look") || (q.get("flavor") === "win" ? "flat" : "modern"));
     }
     window.lazyui = ui;
     ui.set("cpu", 42);
