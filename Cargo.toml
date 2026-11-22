@@ -1,0 +1,22 @@
+[package]
+name = "lazyui"
+version = "0.1.0"
+edition = "2021"
+description = "Terminal UI as data: cell canvas, layout, springs, spec language, headless-first; one library and one binary"
+license = "MIT"
+readme = "README.md"
+
+[lib]
+name = "lazyui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lazyui"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true

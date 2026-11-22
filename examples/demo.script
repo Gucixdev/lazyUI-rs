@@ -1,0 +1,14 @@
+size 40 12
+set cpu=64
+expect focus tabs
+key tab
+expect focus q
+type et
+expect event q change et
+expect text "beta"
+expect no-text "alpha"
+key tab
+key down
+key enter
+expect event files activate
+snap

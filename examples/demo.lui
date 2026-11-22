@@ -1,0 +1,11 @@
+# lazyui demo: tabs, a live bar, a searchable list, a keybar
+col
+  buttonbar id=tabs items="main,extras" active=tab
+  pages bind=tab
+    col
+      panel title="load" size=3
+        progressbar name=cpu bind=cpu max=100
+      searchbar id=q prompt="> " bind=query
+      list id=files items="alpha,beta,gamma,delta,epsilon,zeta" filter=query
+    text text="nothing on this page yet" style=dim
+  keybar hints="tab:focus;ctrl-q:quit"
