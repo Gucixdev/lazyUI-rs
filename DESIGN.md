@@ -112,4 +112,18 @@ Honest gaps: the GPU path is compiled and falls back correctly but has **never p
 Wayland session cannot present, `vkcube` crashes too), so its speed-up is unmeasured and the tuner thresholds are
 guesses. Today the CPU still rasterises glyphs on both paths; the GPU only presents. Real gain needs phase 2
 (glyph atlas on the GPU, pixel-native widgets). Keyboard and mouse mapping is written but was only exercised without
-real input events. Ime commit is delivered as `Paste`. kmscon/VT console support and a web backend are still open.
+real input events. Ime commit is delivered as `Paste`. kmscon/VT console support are still open.
+
+## Web backend (2026-11-22)
+
+`src/web/`, feature `web`, compiled only for the page: `Web` is plain safe Rust around `Ui` (events in, a flat `u32`
+cell array out: char, fg, bg, mods; colour words 0 default / 0x01000000|idx / 0x02000000|rgb), so it is unit-tested
+natively; `ffi.rs` (wasm only) is a C-ABI shell with `lz_alloc/free`, `lz_init/reload`, `lz_key/text/mouse/paste`,
+`lz_tick/render/wake_ms`, `lz_events/error`. No wasm-bindgen: nothing to version. `web/lazyui.js` paints and maps DOM
+events; `lz_wake_ms` tells it to sleep (-1), use rAF (animating) or one timeout (next `every`). Long gaps are ticked in
+50 ms steps (capped at 5 s) so a hidden tab does not lose timers. `term`, `runtime`, `session` and `libc` are
+`cfg(not(wasm32))`.
+
+Verified: 9 native tests of `Web`, `node web/test.mjs` on the built `.wasm`, and headless Chromium over CDP (render,
+typing + filter, click, `set`, screenshot). Not verified: Firefox/Safari, touch and IME (no hidden text input yet, so
+phones cannot type), high-DPI beyond a scale factor of 1, wide (CJK) glyphs are drawn one cell wide.

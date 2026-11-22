@@ -1,3 +1,4 @@
 target/
 references/*.zip
 references/lazytui/
+web/dist/

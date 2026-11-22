@@ -96,9 +96,24 @@ Pixels reach the screen on the CPU (shared memory, works on any compositor or X1
 clearly cheaper; if not, it goes back and stops trying. `--render cpu|gpu` forces one; a GPU that cannot be created
 falls back to the CPU. Animation slows toward 10 Hz when frames are slow. Idle costs nothing.
 
+## Web (feature `web`, WebAssembly)
+
+The same `Ui` in a browser tab, as a static page: no server, no framework, no npm. `web/run` builds the engine to a
+170 KB `.wasm` (`wasm32-unknown-unknown`) and serves `web/dist` on :8000; `web/lazyui.js` paints the cells on a
+`<canvas>` with the browser's fonts and turns keys, mouse, wheel and paste into events.
+
+```js
+import { mount } from "./lazyui.js";
+const ui = await mount(canvas, { wasm: "lazyui.wasm", spec });
+ui.set("cpu", 42);  ui.on("activate", e => ...);  ui.key("ctrl-r");  ui.theme("green");  ui.reload(spec2);
+```
+
+The page sleeps when nothing moves (no timer, no animation frame). `node web/test.mjs` drives the built module without a
+browser. The terminal-only parts (`term`, `runtime`, `session`, `libc`) are not compiled for wasm.
+
 ## Not yet
 
 Kitty keyboard protocol, tree/dropdown/scroll containers, the lazytui bars (ring/zone/pacman), pixel-native widgets
-(smooth progress, rounded rects, proportional fonts), a web backend. See `DESIGN.md` for the honest list.
+(smooth progress, rounded rects, proportional fonts), touch/IME input in the web page, `lazyui serve`. See `DESIGN.md` for the honest list.
 
 MIT.

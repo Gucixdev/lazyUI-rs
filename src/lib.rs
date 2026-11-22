@@ -5,9 +5,14 @@ pub mod gui;
 pub mod headless;
 pub mod input;
 pub mod layout;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod session;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod term;
 pub mod theme;
 pub mod ui;
+#[cfg(feature = "web")]
+pub mod web;
 pub mod widgets;

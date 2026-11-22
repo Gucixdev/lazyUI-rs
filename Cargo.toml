@@ -9,6 +9,7 @@ readme = "README.md"
 [lib]
 name = "lazyui"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "lazyui"
@@ -19,11 +20,15 @@ path = "src/main.rs"
 default = ["gui", "gpu"]
 # a window: winit + a real font, pixels shown through shared memory (no GPU needed)
 gui = ["dep:winit", "dep:softbuffer", "dep:fontdue"]
+# the engine for a web page: `web/run` builds it to WebAssembly (no dependencies, no JS toolchain)
+web = []
 # the window may also present through wgpu; chosen at run time by measured cost, never required
 gpu = ["gui", "dep:wgpu", "dep:pollster"]
 
-[dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "0.2"
+
+[dependencies]
 fontdue = { version = "0.9", optional = true }
 softbuffer = { version = "0.4.8", optional = true, default-features = false, features = ["kms", "x11", "wayland"] }
 winit = { version = "0.30.13", optional = true, default-features = false, features = ["rwh_06", "wayland", "x11", "wayland-dlopen", "wayland-csd-adwaita"] }

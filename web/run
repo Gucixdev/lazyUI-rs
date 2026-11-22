@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Build the wasm engine into web/dist and serve it: http://localhost:8000
+# Needs: cargo with the wasm32-unknown-unknown target. wasm-opt (binaryen) and python3 are used when present.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(dirname "$here")
+out=$here/dist
+cd "$root"
+cargo build --lib --release --target wasm32-unknown-unknown --no-default-features --features web
+mkdir -p "$out"
+wasm=target/wasm32-unknown-unknown/release/lazyui.wasm
+if command -v wasm-opt >/dev/null; then wasm-opt -Oz --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int "$wasm" -o "$out/lazyui.wasm"; else cp "$wasm" "$out/lazyui.wasm"; fi
+cp "$here/lazyui.js" "$here/index.html" "$out/"
+cp "$root/examples/demo.lui" "$out/demo.lui"
+printf 'lazyui web: %s bytes wasm in %s\n' "$(wc -c <"$out/lazyui.wasm")" "$out" >&2
+[ "${WEB_NO_SERVE:-}" = 1 ] && exit 0
+exec python3 -m http.server 8000 --directory "$out"

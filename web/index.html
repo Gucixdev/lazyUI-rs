@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lazyui</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #0b0f0c; color: #cde6cd; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #err { position: fixed; inset: 1rem; color: #f14c4c; font: 14px monospace; white-space: pre-wrap; }
+</style>
+<canvas id="ui"></canvas>
+<div id="err"></div>
+<script type="module">
+  import { mount } from "./lazyui.js";
+  const q = new URLSearchParams(location.search);
+  try {
+    const spec = await (await fetch(q.get("spec") || "demo.lui")).text();
+    const ui = await mount(document.getElementById("ui"), { wasm: "lazyui.wasm", spec, theme: q.get("theme") || undefined });
+    window.lazyui = ui;
+    ui.set("cpu", 42);
+    ui.on((e) => console.log("lazyui event", e));
+    ui.canvas = document.getElementById("ui");
+    ui.canvas.focus();
+  } catch (e) { document.getElementById("err").textContent = String(e); }
+</script>
