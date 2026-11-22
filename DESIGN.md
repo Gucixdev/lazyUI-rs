@@ -147,3 +147,13 @@ keys), so it cannot reach the Ui. `live` widgets (spinner) keep the loop drawing
 headless snapshot waits for `settling()`, the loops use `animating()`. The registry is a static table, not a plugin
 loader: a widget that is not in the crate is a data widget (a file) instead. Gaps: barchart/histogram have no axis frame
 yet, zonebar has no bold ink, colours of `graph` follow one accent shade instead of the theme gradient.
+
+## Web skin direction (2026-11-22, not built yet)
+The web backend currently paints the cell grid on a canvas. By request the browser should look like a web/OS app (Apple/Windows
+feel, icons, light and dark), not like a terminal. So: a DOM renderer fed by `tree_json` + model, the same events back into
+`Ui`. Widgets get `describe()` (semantic data: series, rows, tree nodes) so charts become SVG and lists/tables real HTML.
+The grid canvas stays as the TUI/GUI-window path and as a fallback (`mount({skin:"grid"})`).
+
+Batch two added `overlay` (drawn after everything, so a dropdown popup lies over its neighbours) and `extent` (the area
+that takes the mouse, larger while a popup is open), and `Def.live` became a period: a spinner (0.1 s) keeps the loop
+drawing, a clock (1 s) is only a deadline for `next_deadline`. A timer widget ticks on the Ui clock and emits `done`.

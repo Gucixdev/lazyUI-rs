@@ -93,7 +93,7 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 
 Charts and the like need code, so they are Rust, registered by name (`lazyui widgets ls` lists them with their attributes).
 Data comes from `values="1,2,3"` or `bind=KEY` (a comma list in the model; `ui.push(key, sample, cap)` appends and
-keeps the newest `cap`). Done: `graph barchart histogram zonebar piebar segbar gauge ringbar spinner`. They draw with
+keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table`. They draw with
 block/braille glyphs on a Unicode terminal and with `# = . :` on an ASCII one, so a snapshot is the same everywhere.
 `ringbar` and `spinner` move with the Ui clock (`tick`), never the wall clock.
 

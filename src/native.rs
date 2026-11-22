@@ -65,6 +65,14 @@ impl Cx<'_> {
             _ => Vec::new(),
         }
     }
+    /// Items of a list-like widget: `from=KEY` (comma separated text in the model) when that key exists, else `items=`.
+    pub fn items(&self) -> Vec<String> {
+        match self.el.attr("from").and_then(|k| self.model_text(k)) {
+            Some(t) if !t.is_empty() => t.split(',').map(|x| x.trim().to_string()).collect(),
+            Some(_) => Vec::new(),
+            None => self.list_attr("items"),
+        }
+    }
     pub fn flag(&self, k: &str) -> bool {
         matches!(self.el.attr(k), Some("1" | "true" | "yes" | "on"))
     }
@@ -113,7 +121,14 @@ pub trait Widget {
     fn event(&mut self, _r: Rect, _ev: &Event, _cx: &mut EvCx) -> Res {
         Res::Ignored
     }
-    fn tick(&mut self, _dt: f64) {}
+    /// Time passed (virtual clock). May emit events and set bound keys, like a key press.
+    fn tick(&mut self, _dt: f64, _cx: &mut EvCx) {}
+    /// Drawn after everything else, so a popup can lie over its neighbours.
+    fn overlay(&mut self, _c: &mut Canvas, _r: Rect, _cx: &Cx) {}
+    /// The area that takes the mouse: `r`, or more while a popup is open.
+    fn extent(&self, r: Rect) -> Rect {
+        r
+    }
     /// True while it is still settling towards its picture (the headless snapshot waits for this).
     fn animating(&self) -> bool {
         false
@@ -138,15 +153,18 @@ pub struct Def {
     pub focus: bool,
     /// Some(n): n rows tall inside a column unless `size` says otherwise
     pub rows: Option<i32>,
-    /// its picture changes with time alone (the loop must keep drawing)
-    pub live: bool,
+    /// its picture changes with time alone: seconds between frames (0 = only when something happens).
+    /// 0.1 or less keeps the loop drawing; longer is a timer deadline
+    pub live: f64,
     pub make: fn() -> Box<dyn Widget>,
 }
 
+const TABLES: [&[Def]; 3] = [crate::charts::DEFS, crate::lists::DEFS, crate::timers::DEFS];
+
 pub fn find(name: &str) -> Option<&'static Def> {
-    crate::charts::DEFS.iter().find(|d| d.name == name)
+    all().find(|d| d.name == name)
 }
 
 pub fn all() -> impl Iterator<Item = &'static Def> {
-    crate::charts::DEFS.iter()
+    TABLES.into_iter().flat_map(|t| t.iter())
 }

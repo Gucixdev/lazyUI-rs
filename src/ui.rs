@@ -176,7 +176,7 @@ fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::compon
             return Err(format!("{n}: expected an element kind first, got `{kind_s}`"));
         }
         let kind = Kind::parse(kind_s).ok_or_else(|| {
-            let known = ["pacmanbar", "dropdown", "tree", "scroll", "rain", "custom", "stack"];
+            let known = ["pacmanbar", "scroll", "rain", "custom", "stack"];
             if known.contains(&kind_s.as_str()) {
                 format!("{n}: `{kind_s}` exists in lazytui (C) but not in lazyui yet")
             } else {
@@ -520,12 +520,20 @@ impl Ui {
                 self.dirty = true;
             }
         }
-        for st in self.states.values_mut() {
-            if let WState::Custom(w) = st {
-                w.tick(dt);
+        let custom: Vec<(String, Vec<usize>)> = self.placed.iter().filter(|p| matches!(p.kind, Kind::Custom(_))).map(|p| (p.id.clone(), p.path.clone())).collect();
+        for (id, path) in custom {
+            let Some(el) = Ui::el_at(&self.root, &path).cloned() else { continue };
+            if let Some(WState::Custom(w)) = self.states.get_mut(&id) {
+                let mut cx = crate::native::EvCx { el: &el, id: &id, model: &self.model, out: Vec::new(), set: Vec::new() };
+                w.tick(dt, &mut cx);
+                let (out, set) = (cx.out, cx.set);
+                self.events.extend(out);
+                for (k, v) in set {
+                    self.put(&k, v);
+                }
             }
         }
-        if self.live() {
+        if self.live().is_some() {
             self.dirty = true;
         }
         let mut fired = Vec::new();
@@ -544,17 +552,24 @@ impl Ui {
     pub fn settling(&self) -> bool {
         self.springs.values().any(|s| !s.at_rest()) || self.states.values().any(|s| matches!(s, WState::Custom(w) if w.animating()))
     }
-    /// A widget on screen changes with time alone (a spinner): the loop has to keep drawing, but nothing "settles".
-    pub fn live(&self) -> bool {
-        self.placed.iter().any(|p| matches!(p.kind, Kind::Custom(n) if crate::native::find(n).is_some_and(|d| d.live)))
+    /// Shortest frame period of the widgets on screen that change with time alone (a clock, a spinner), if any.
+    pub fn live(&self) -> Option<f64> {
+        self.placed
+            .iter()
+            .filter_map(|p| match p.kind {
+                Kind::Custom(n) => crate::native::find(n).map(|d| d.live).filter(|l| *l > 0.0),
+                _ => None,
+            })
+            .fold(None, |m: Option<f64>, x| Some(m.map_or(x, |y| y.min(x))))
     }
-    /// The loop needs frames: settling or live.
+    /// The loop needs a frame every tick: something settling, or a live widget that moves faster than 10 per second.
     pub fn animating(&self) -> bool {
-        self.settling() || self.live()
+        self.settling() || self.live().is_some_and(|p| p <= 0.1)
     }
     /// Seconds until the next periodic event, if there is one.
     pub fn next_deadline(&self) -> Option<f64> {
-        self.every.iter().map(|(p, a, _)| (p - a).max(0.0)).fold(None, |m: Option<f64>, x| Some(m.map_or(x, |y| y.min(x))))
+        let live = self.live().filter(|p| *p > 0.1).map(|p| p - self.clock.rem_euclid(p));
+        self.every.iter().map(|(p, a, _)| (p - a).max(0.0)).chain(live).fold(None, |m: Option<f64>, x| Some(m.map_or(x, |y| y.min(x))))
     }
 
     // ---- layout -----------------------------------------------------------------------------------
@@ -642,6 +657,14 @@ impl Ui {
         for (i, p) in placed.iter().enumerate() {
             let Some(el) = Ui::el_at(&root, &p.path) else { continue };
             self.draw_one(c, el, p, focus_chain.contains(&i));
+        }
+        for p in placed.iter().filter(|p| matches!(p.kind, Kind::Custom(_))) {
+            let Some(el) = Ui::el_at(&root, &p.path) else { continue };
+            let focused = self.focus.as_deref() == Some(p.id.as_str());
+            if let Some(WState::Custom(w)) = self.states.get_mut(&p.id) {
+                let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, focused, unicode: c.caps.unicode, time: self.clock };
+                w.overlay(c, p.rect, &cx);
+            }
         }
         self.root = root;
         self.dirty = false;
@@ -844,7 +867,7 @@ impl Ui {
                 None => false,
             },
             Event::Mouse(kind, x, y, _) => {
-                let hit = self.placed.iter().rev().find(|p| p.kind.focusable() && p.rect.contains(*x, *y)).map(|p| p.id.clone());
+                let hit = self.placed.iter().rev().find(|p| p.kind.focusable() && self.extent_of(p).contains(*x, *y)).map(|p| p.id.clone());
                 match hit {
                     Some(id) => {
                         if matches!(kind, MouseKind::Down(0)) && self.focus.as_deref() != Some(id.as_str()) {
@@ -864,6 +887,13 @@ impl Ui {
                     }
                 }
             }
+        }
+    }
+
+    fn extent_of(&self, p: &Placed) -> Rect {
+        match self.states.get(&p.id) {
+            Some(WState::Custom(w)) => w.extent(p.rect),
+            _ => p.rect,
         }
     }
 
@@ -1101,7 +1131,7 @@ col
     #[test]
     fn spec_errors_carry_the_line() {
         assert_eq!(parse_spec("col\n  wat\n").unwrap_err(), "line 2: unknown element `wat`");
-        assert_eq!(parse_spec("col\n  tree\n").unwrap_err(), "line 2: `tree` exists in lazytui (C) but not in lazyui yet");
+        assert_eq!(parse_spec("col\n  pacmanbar\n").unwrap_err(), "line 2: `pacmanbar` exists in lazytui (C) but not in lazyui yet");
         assert!(parse_spec("col\n  text text=\"open\n").unwrap_err().starts_with("line 2: a quote"));
         assert!(parse_spec("col\n  text size=big\n").unwrap_err().starts_with("line 2: size"));
         assert!(parse_spec("text\n  text\n").unwrap_err().contains("cannot hold children"));

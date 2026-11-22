@@ -106,6 +106,69 @@ pub fn slice(weights: &[f64], total: i32) -> Vec<i32> {
     out
 }
 
+/// A grid of braille dots: each terminal cell holds 2 x 4 dots, so a line chart gets eight times the resolution.
+pub struct Braille {
+    pub cw: i32,
+    pub ch: i32,
+    bits: Vec<u8>,
+}
+
+impl Braille {
+    pub fn new(cw: i32, ch: i32) -> Braille {
+        let (cw, ch) = (cw.max(0), ch.max(0));
+        Braille { cw, ch, bits: vec![0; (cw * ch) as usize] }
+    }
+    pub fn dots_w(&self) -> i32 {
+        self.cw * 2
+    }
+    pub fn dots_h(&self) -> i32 {
+        self.ch * 4
+    }
+    pub fn set(&mut self, x: i32, y: i32) {
+        if x < 0 || y < 0 || x >= self.dots_w() || y >= self.dots_h() {
+            return;
+        }
+        const BIT: [[u8; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+        self.bits[((y / 4) * self.cw + x / 2) as usize] |= BIT[(x % 2) as usize][(y % 4) as usize];
+    }
+    /// A straight line between two dots (Bresenham).
+    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
+        let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+        let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
+        let (mut x, mut y, mut err) = (x0, y0, dx + dy);
+        loop {
+            self.set(x, y);
+            if x == x1 && y == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+    pub fn bits(&self, cx: i32, cy: i32) -> u8 {
+        self.bits[(cy * self.cw + cx) as usize]
+    }
+    /// The character for a cell: braille, or `*` / `.` / `'` on a terminal without it.
+    pub fn glyph(bits: u8, unicode: bool) -> char {
+        if bits == 0 {
+            ' '
+        } else if unicode {
+            char::from_u32(0x2800 + bits as u32).unwrap_or(' ')
+        } else if bits & 0x0F != 0 && bits & 0xF0 != 0 || bits & 0xC0 != 0 && bits & 0x3F != 0 {
+            '*'
+        } else {
+            ':'
+        }
+    }
+}
+
 /// A comma separated list of numbers; what does not parse is skipped.
 pub fn numbers(s: &str) -> Vec<f64> {
     s.split(',').filter_map(|x| x.trim().parse::<f64>().ok()).filter(|x| x.is_finite()).collect()
@@ -135,6 +198,19 @@ mod tests {
         assert_eq!(level(&t, 0.0), t.ok);
         assert_eq!(level(&t, 1.0), t.err);
         assert_eq!(level(&t, f64::NAN), t.ok);
+    }
+
+    #[test]
+    fn braille_dots_and_lines() {
+        let mut b = Braille::new(2, 1);
+        b.set(0, 0);
+        b.set(1, 3);
+        assert_eq!(b.bits(0, 0), 0x01 | 0x80);
+        b.set(99, 99); // outside: ignored
+        b.line(0, 0, 3, 3);
+        assert!(b.bits(1, 0) != 0);
+        assert_eq!(Braille::glyph(0x01, true), '\u{2801}');
+        assert_eq!(Braille::glyph(0, false), ' ');
     }
 
     #[test]

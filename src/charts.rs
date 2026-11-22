@@ -10,15 +10,17 @@ fn pure(f: fn(&mut Canvas, Rect, &Cx)) -> Box<dyn Widget> {
 }
 
 pub static DEFS: &[Def] = &[
-    Def { name: "graph", doc: "bars of the latest samples, one to many rows: bind=KEY|values=1,2,3 min max color", focus: false, rows: None, live: false, make: || pure(graph) },
-    Def { name: "barchart", doc: "vertical bars with labels under them: values labels max show=1 color", focus: false, rows: None, live: false, make: || pure(barchart) },
-    Def { name: "histogram", doc: "counts of samples per bin: values bins min max show=1", focus: false, rows: None, live: false, make: || pure(histogram) },
-    Def { name: "zonebar", doc: "one bar split by weights (used/cache/free): values labels colors legend=1", focus: false, rows: None, live: false, make: || pure(zonebar) },
-    Def { name: "piebar", doc: "like zonebar, legend on by default: values labels colors", focus: false, rows: None, live: false, make: || pure(piebar) },
-    Def { name: "segbar", doc: "one row stacked bar of values out of total, then a suffix: values total suffix colors", focus: false, rows: Some(1), live: false, make: || pure(segbar) },
-    Def { name: "gauge", doc: "a level bar that goes green to red: bind|value min max label text color low=bad", focus: false, rows: Some(1), live: false, make: || pure(gauge) },
-    Def { name: "ringbar", doc: "text scrolling round as an endless ring: text speed color", focus: false, rows: Some(1), live: true, make: || pure(ringbar) },
-    Def { name: "spinner", doc: "something is working: style=dots|line|bounce text speed color", focus: false, rows: Some(1), live: true, make: || pure(spinner) },
+    Def { name: "graph", doc: "bars of the latest samples, one to many rows: bind=KEY|values=1,2,3 min max color", focus: false, rows: None, live: 0.0, make: || pure(graph) },
+    Def { name: "barchart", doc: "vertical bars with labels under them: values labels max show=1 color", focus: false, rows: None, live: 0.0, make: || pure(barchart) },
+    Def { name: "histogram", doc: "counts of samples per bin: values bins min max show=1", focus: false, rows: None, live: 0.0, make: || pure(histogram) },
+    Def { name: "zonebar", doc: "one bar split by weights (used/cache/free): values labels colors legend=1", focus: false, rows: None, live: 0.0, make: || pure(zonebar) },
+    Def { name: "piebar", doc: "like zonebar, legend on by default: values labels colors", focus: false, rows: None, live: 0.0, make: || pure(piebar) },
+    Def { name: "segbar", doc: "one row stacked bar of values out of total, then a suffix: values total suffix colors", focus: false, rows: Some(1), live: 0.0, make: || pure(segbar) },
+    Def { name: "linechart", doc: "a line through the samples in braille dots: values|bind min max color", focus: false, rows: None, live: 0.0, make: || pure(linechart) },
+    Def { name: "heatgrid", doc: "cells shaded by value: values cols min max color ramp=level", focus: false, rows: None, live: 0.0, make: || pure(heatgrid) },
+    Def { name: "gauge", doc: "a level bar that goes green to red: bind|value min max label text color low=bad", focus: false, rows: Some(1), live: 0.0, make: || pure(gauge) },
+    Def { name: "ringbar", doc: "text scrolling round as an endless ring: text speed color", focus: false, rows: Some(1), live: 0.05, make: || pure(ringbar) },
+    Def { name: "spinner", doc: "something is working: style=dots|line|bounce text speed color", focus: false, rows: Some(1), live: 0.1, make: || pure(spinner) },
 ];
 
 fn base_style(cx: &Cx, fg: Color) -> Style {
@@ -320,6 +322,67 @@ fn gauge(c: &mut Canvas, r: Rect, cx: &Cx) {
     }
 }
 
+// ---- linechart, heatgrid -------------------------------------------------------------------------------
+
+fn linechart(c: &mut Canvas, r: Rect, cx: &Cx) {
+    let v = cx.series();
+    if r.w < 1 || r.h < 1 || v.is_empty() {
+        return;
+    }
+    let lo = cx.num_attr("min", v.iter().cloned().fold(f64::INFINITY, f64::min).min(0.0));
+    let hi = auto_max(&v, lo, cx.num_attr("max", f64::NAN));
+    let mut b = crate::gfx::Braille::new(r.w, r.h);
+    let (dw, dh) = (b.dots_w(), b.dots_h());
+    let pt = |i: usize| -> (i32, i32) {
+        let x = if v.len() == 1 { 0 } else { (i as f64 * (dw - 1) as f64 / (v.len() - 1) as f64).round() as i32 };
+        let f = clamp01((v[i] - lo) / (hi - lo));
+        (x, dh - 1 - (f * (dh - 1) as f64).round() as i32)
+    };
+    let (mut px, mut py) = pt(0);
+    b.set(px, py);
+    for i in 1..v.len() {
+        let (x, y) = pt(i);
+        b.line(px, py, x, y);
+        (px, py) = (x, y);
+    }
+    let col = cx.colour("color", cx.theme.accent);
+    for cy in 0..r.h {
+        for cxx in 0..r.w {
+            let bits = b.bits(cxx, cy);
+            if bits != 0 {
+                c.put(r.x + cxx, r.y + cy, crate::gfx::Braille::glyph(bits, cx.unicode), base_style(cx, col));
+            }
+        }
+    }
+}
+
+fn heatgrid(c: &mut Canvas, r: Rect, cx: &Cx) {
+    let v = cx.series();
+    if r.w < 2 || r.h < 1 || v.is_empty() {
+        return;
+    }
+    let t = cx.theme;
+    let cols = (cx.num_attr("cols", (v.len() as f64).sqrt().ceil()).max(1.0) as usize).min(r.w as usize / 2).max(1);
+    let lo = cx.num_attr("min", v.iter().cloned().fold(f64::INFINITY, f64::min));
+    let hi = auto_max(&v, lo, cx.num_attr("max", f64::NAN));
+    let base = cx.colour("color", t.accent);
+    const DENSITY: [char; 10] = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
+    for (i, x) in v.iter().enumerate() {
+        let (gx, gy) = ((i % cols) as i32, (i / cols) as i32);
+        if gy >= r.h {
+            break;
+        }
+        let f = clamp01((x - lo) / (hi - lo));
+        let col = if cx.attr("ramp") == Some("level") { level(t, f) } else { mix(t.bg, base, 0.1 + 0.9 * f) };
+        let rect = Rect::new(r.x + gx * 2, r.y + gy, 2, 1);
+        if cx.unicode {
+            c.fill(rect, ' ', Style::fg(col).on(col));
+        } else {
+            c.fill(rect, DENSITY[(f * 9.0).round() as usize], base_style(cx, col));
+        }
+    }
+}
+
 // ---- ringbar, spinner ---------------------------------------------------------------------------------
 
 fn ringbar(c: &mut Canvas, r: Rect, cx: &Cx) {
@@ -397,6 +460,13 @@ mod tests {
         "zonebar values=0,0",
         "piebar values=1,1,1,1,1,1,1,1,1",
         "segbar values=30,20 total=100 suffix=\" 50%\"",
+        "linechart values=1,4,2,8,3,9 max=10",
+        "heatgrid values=1,2,3,4,5,6,7,8,9 cols=3",
+        "tree items=a/b/c,a/d,e open=1",
+        "dropdown items=one,two,three label=pick",
+        "table columns=name,n rows=\"x,1;y,22;z,3\"",
+        "clock bind=t",
+        "timer seconds=5 autostart=1",
         "gauge value=64 label=cpu",
         "gauge value=-5 min=10 max=10",
         "ringbar text=\"héllo wörld 日本語\"",
@@ -508,5 +578,24 @@ mod tests {
         assert!(rows(&b)[0].starts_with("bc   abc"), "{b}");
         assert!(rows(&b)[1].contains("wait"), "{b}");
         assert!(!Ui::from_spec("text text=hi").unwrap().animating(), "a still screen needs no frames");
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use crate::headless::snapshot;
+    use crate::ui::Ui;
+
+    #[test]
+    fn linechart_and_heatgrid_draw() {
+        let mut ui = Ui::from_spec("linechart values=0,10,0,10 max=10").unwrap();
+        let s = snapshot(&mut ui, 8, 3);
+        assert!(s.contains('*') || s.contains(':'), "{s}");
+        // a flat series is a line along the bottom, not a crash
+        let flat = snapshot(&mut Ui::from_spec("linechart values=3,3,3").unwrap(), 6, 2);
+        assert!(flat.lines().any(|l| !l.trim().is_empty()), "{flat}");
+        let g = snapshot(&mut Ui::from_spec("heatgrid values=0,9,0,9 cols=2").unwrap(), 4, 2);
+        assert_eq!(g.lines().next().unwrap(), "  @@", "{g}");
+        assert_eq!(g.lines().nth(1).unwrap(), "  @@", "{g}");
     }
 }
