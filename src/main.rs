@@ -3,10 +3,11 @@
 use lazyui::canvas::Caps;
 use lazyui::headless;
 use lazyui::runtime::{drive, Incoming, Opts};
+use lazyui::session::{self, SpecMsg};
 use lazyui::term::Mode;
 use lazyui::theme::Theme;
 use lazyui::ui::Ui;
-use std::io::{BufRead, Read, Write};
+use std::io::Read;
 use std::process::exit;
 
 const HELP: &str = "\
@@ -29,6 +30,11 @@ options:
   --hotkey KEY=NAME  run: KEY (ctrl-r, f5, q) emits event app/NAME (repeatable); ctrl-q always quits
   --every SEC=NAME   run: emit app/NAME every SEC seconds (repeatable)
   --watch            run: reload SPEC when the file changes; a bad edit keeps the old UI
+  --gui              run: open a window instead of using the terminal (same spec, same pipes)
+  --render MODE      gui: auto (default: CPU, GPU when frames measure slow and it helps) | cpu | gpu
+  --font FILE.ttf    gui/--png: monospace font (default: DejaVu Sans Mono via fontconfig)
+  --font-px N        gui/--png: font size in logical pixels (default 17)
+  --png FILE         snap: also write the frame as a PNG rendered with the window's rasteriser
 
 run talks on the pipes while the UI is on /dev/tty:
   stdout  one JSON object per event:  {\"id\":\"q\",\"kind\":\"change\",\"text\":\"ab\",\"index\":-1,\"number\":0}
@@ -53,6 +59,11 @@ struct Args {
     hotkeys: Vec<(String, String)>,
     every: Vec<(f64, String)>,
     watch: bool,
+    gui: bool,
+    render: String,
+    font: Option<String>,
+    font_px: f32,
+    png: Option<String>,
 }
 
 fn die(msg: &str) -> ! {
@@ -66,7 +77,7 @@ fn parse_args() -> Args {
         print!("{HELP}");
         exit(0)
     });
-    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false };
+    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None };
     let mut rest: Vec<String> = it.collect();
     rest.reverse();
     while let Some(x) = rest.pop() {
@@ -96,6 +107,11 @@ fn parse_args() -> Args {
                 a.every.push((s.parse().unwrap_or_else(|_| die("--every SEC=NAME")), n.to_string()));
             }
             "--watch" => a.watch = true,
+            "--gui" => a.gui = true,
+            "--render" => a.render = val("--render"),
+            "--font" => a.font = Some(val("--font")),
+            "--font-px" => a.font_px = val("--font-px").parse().unwrap_or_else(|_| die("--font-px N")),
+            "--png" => a.png = Some(val("--png")),
             "-h" | "--help" | "help" => {
                 print!("{HELP}");
                 exit(0)
@@ -134,11 +150,6 @@ fn load_ui(a: &Args, spec_path: &str) -> Ui {
     ui
 }
 
-enum Msg {
-    Line(String),
-    Reload,
-}
-
 fn main() {
     let a = parse_args();
     match a.cmd.as_str() {
@@ -153,6 +164,9 @@ fn main() {
             let (w, h) = a.size;
             if a.cmd == "snap" {
                 print!("{}", headless::snapshot(&mut ui, w, h));
+                if let Some(out) = &a.png {
+                    write_png(&mut ui, a.size, out, &a);
+                }
             } else {
                 println!("{}", headless::tree(&mut ui, w, h));
             }
@@ -217,71 +231,84 @@ fn run(a: &Args) {
         ui.every(*s, n);
     }
     ui.hotkey("ctrl-q", "quit");
+    if a.gui {
+        run_gui(a, ui, p);
+        return;
+    }
     let opts = Opts { mode: a.inline.map(Mode::Inline).unwrap_or(Mode::Full), mouse: a.mouse, caps: Caps::detect() };
-    let (watch, path) = (a.watch, p.clone());
-    let stdin_is_tty = unsafe { libc::isatty(0) } == 1;
-    let stdout = std::io::stdout();
-    let res = drive::<Msg>(&mut ui, opts, |ui, inc, cx| match inc {
+    let path = p.clone();
+    let watch = a.watch;
+    let res = drive::<SpecMsg>(&mut ui, opts, |ui, inc, cx| match inc {
         Incoming::Start => {
-            if !stdin_is_tty {
-                let (tx, w) = cx.channel();
-                std::thread::spawn(move || {
-                    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-                        if tx.send(Msg::Line(line)).is_err() {
-                            break;
-                        }
-                        w.wake();
-                    }
-                });
-            }
-            if watch {
-                let (tx, w) = cx.channel();
-                let path = path.clone();
-                std::thread::spawn(move || {
-                    let mt = |p: &str| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-                    let mut last = mt(&path);
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                        let now = mt(&path);
-                        if now != last && now.is_some() {
-                            last = now;
-                            if tx.send(Msg::Reload).is_err() {
-                                break;
-                            }
-                            w.wake();
-                        }
-                    }
-                });
-            }
+            let (tx, w) = cx.channel();
+            session::spawn_feeds(&path, watch, move |m| {
+                let ok = tx.send(m).is_ok();
+                w.wake();
+                ok
+            });
         }
-        Incoming::Ui(e) => {
-            let mut o = stdout.lock();
-            let _ = writeln!(o, "{}", e.to_json());
-            let _ = o.flush();
-        }
-        Incoming::Msg(Msg::Line(l)) => {
-            let l = l.trim();
-            if l == "quit" {
+        Incoming::Ui(e) => session::print_event(&e),
+        Incoming::Msg(m) => {
+            if session::handle(ui, &path, m) {
                 cx.quit();
-            } else if let Some(rest) = l.strip_prefix("list:") {
-                if let Some((id, items)) = rest.split_once('=') {
-                    ui.set_list(id, items.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
-                }
-            } else if let Some((k, v)) = l.split_once('=') {
-                ui.set_auto(k.trim(), v);
             }
         }
-        Incoming::Msg(Msg::Reload) => match std::fs::read_to_string(&path) {
-            Ok(src) => {
-                if let Err(e) = ui.reload_spec(&src) {
-                    ui.emit("app", "spec-error", &e, 0.0);
-                }
-            }
-            Err(_) => {}
-        },
     });
     if let Err(e) = res {
         eprintln!("lazyui: {e}");
         exit(1);
     }
+}
+
+#[cfg(feature = "gui")]
+fn write_png(ui: &mut Ui, (w, h): (i32, i32), out: &str, a: &Args) {
+    use lazyui::canvas::Canvas;
+    use lazyui::gui::{png, raster::{Pixels, Raster}};
+    let mut c = Canvas::new(w, h, Caps::FULL);
+    ui.render(&mut c);
+    let mut r = Raster::system(a.font_px, a.font.as_deref()).unwrap_or_else(|e| die(&e));
+    let mut px = Pixels::new(w as usize * r.cw, h as usize * r.ch, r.default_bg);
+    r.paint(&mut px, None, &c);
+    std::fs::write(out, png::encode(px.w as u32, px.h as u32, &px.rgba)).unwrap_or_else(|e| die(&format!("{out}: {e}")));
+    eprintln!("{out}: {}x{} px, cell {}x{}", px.w, px.h, r.cw, r.ch);
+}
+
+#[cfg(not(feature = "gui"))]
+fn write_png(_: &mut Ui, _: (i32, i32), _: &str, _: &Args) {
+    die("this build has no window backend (cargo feature `gui`)");
+}
+
+#[cfg(feature = "gui")]
+fn run_gui(a: &Args, mut ui: Ui, path: String) {
+    use lazyui::gui::{drive_gui, GuiOpts, Render};
+    let render = Render::parse(&a.render).unwrap_or_else(|| die("--render auto|cpu|gpu"));
+    let (cols, rows) = if a.size == (80, 24) { (100, 30) } else { (a.size.0 as u32, a.size.1 as u32) };
+    let opts = GuiOpts { title: format!("lazyui - {path}"), font_px: a.font_px, font: a.font.clone(), cols, rows, render };
+    let watch = a.watch;
+    let res = drive_gui::<SpecMsg>(&mut ui, opts, |ui, inc, cx| match inc {
+        Incoming::Start => {
+            let (tx, w) = cx.channel();
+            let p = path.clone();
+            session::spawn_feeds(&p, watch, move |m| {
+                let ok = tx.send(m).is_ok();
+                w.wake();
+                ok
+            });
+        }
+        Incoming::Ui(e) => session::print_event(&e),
+        Incoming::Msg(m) => {
+            if session::handle(ui, &path, m) {
+                cx.quit();
+            }
+        }
+    });
+    if let Err(e) = res {
+        eprintln!("lazyui: {e}");
+        exit(1);
+    }
+}
+
+#[cfg(not(feature = "gui"))]
+fn run_gui(_: &Args, _: Ui, _: String) {
+    die("this build has no window backend (cargo feature `gui`)");
 }

@@ -85,9 +85,20 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 `theme` data themes, `input` byte decoder (utf-8, CSI, SGR mouse, paste), `widgets`, `ui` tree + spec + model + focus,
 `headless`, `term` raw mode via libc, `runtime` the loop.
 
+## Window (feature `gui`, on by default)
+
+`lazyui run SPEC --gui` is the same spec and the same pipes in a window; `lazyui snap SPEC --png out.png` renders the
+settled frame with the window's rasteriser (no display, no GPU). Library: `lazyui::gui::drive_gui`, the counterpart of
+`runtime::drive`. Use `default-features = false` for the terminal-only engine that needs just `libc`.
+
+Pixels reach the screen on the CPU (shared memory, works on any compositor or X11) or on the GPU (wgpu, feature `gpu`).
+`--render auto` (default) starts on the CPU and moves to the GPU only when frames measure slow and the GPU makes them
+clearly cheaper; if not, it goes back and stops trying. `--render cpu|gpu` forces one; a GPU that cannot be created
+falls back to the CPU. Animation slows toward 10 Hz when frames are slow. Idle costs nothing.
+
 ## Not yet
 
-Kitty keyboard protocol, tree/dropdown/scroll containers, the lazytui bars (ring/zone/pacman), a GUI surface.
-See `DESIGN.md` for the honest list.
+Kitty keyboard protocol, tree/dropdown/scroll containers, the lazytui bars (ring/zone/pacman), pixel-native widgets
+(smooth progress, rounded rects, proportional fonts), a web backend. See `DESIGN.md` for the honest list.
 
 MIT.

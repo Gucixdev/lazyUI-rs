@@ -32,8 +32,15 @@ pub struct Cx<M> {
 }
 
 impl<M: Send + 'static> Cx<M> {
+    /// For backends other than the terminal loop: `tx` receives messages, `waker` wakes whoever drains them.
+    pub fn new(tx: Sender<M>, waker: Waker) -> Cx<M> {
+        Cx { tx, waker, quit: false }
+    }
+    pub fn quit_requested(&self) -> bool {
+        self.quit
+    }
     pub fn spawn<F: FnOnce() -> M + Send + 'static>(&self, f: F) {
-        let (tx, w) = (self.tx.clone(), self.waker);
+        let (tx, w) = (self.tx.clone(), self.waker.clone());
         std::thread::spawn(move || {
             let m = f();
             if tx.send(m).is_ok() {
@@ -43,7 +50,7 @@ impl<M: Send + 'static> Cx<M> {
     }
     /// Hand out a sender plus waker for a long-lived thread (a file watcher, a socket).
     pub fn channel(&self) -> (Sender<M>, Waker) {
-        (self.tx.clone(), self.waker)
+        (self.tx.clone(), self.waker.clone())
     }
     pub fn send(&self, m: M) {
         if self.tx.send(m).is_ok() {
@@ -82,7 +89,7 @@ pub enum Incoming<M> {
 pub fn drive<M: Send + 'static>(ui: &mut Ui, opts: Opts, mut handler: impl FnMut(&mut Ui, Incoming<M>, &mut Cx<M>)) -> io::Result<()> {
     let mut term = Term::open(opts.mode, opts.mouse)?;
     let (tx, rx) = channel::<M>();
-    let mut cx = Cx { tx, waker: term.waker(), quit: false };
+    let mut cx = Cx::new(tx, term.waker());
     let (mut w, mut h) = term.area();
     if let Mode::Inline(n) = opts.mode {
         term.reserve_inline(n.clamp(1, term.size().1))?;

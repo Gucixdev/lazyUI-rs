@@ -14,8 +14,21 @@ path = "src/lib.rs"
 name = "lazyui"
 path = "src/main.rs"
 
+[features]
+# `default-features = false` gives the library with only `libc`: the embeddable terminal engine.
+default = ["gui", "gpu"]
+# a window: winit + a real font, pixels shown through shared memory (no GPU needed)
+gui = ["dep:winit", "dep:softbuffer", "dep:fontdue"]
+# the window may also present through wgpu; chosen at run time by measured cost, never required
+gpu = ["gui", "dep:wgpu", "dep:pollster"]
+
 [dependencies]
 libc = "0.2"
+fontdue = { version = "0.9", optional = true }
+softbuffer = { version = "0.4.8", optional = true, default-features = false, features = ["kms", "x11", "wayland"] }
+winit = { version = "0.30.13", optional = true, default-features = false, features = ["rwh_06", "wayland", "x11", "wayland-dlopen", "wayland-csd-adwaita"] }
+wgpu = { version = "30", optional = true, default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
+pollster = { version = "0.4", optional = true }
 
 [profile.release]
 opt-level = 3

@@ -95,3 +95,21 @@ Also not in v1 (decided while building, 2026-11-22):
 - **Hotkeys vs typing:** plain characters never fire a hotkey while a searchbar has focus; F-keys and anything with ctrl/alt do.
 - **One painter, not a widget trait.** Widgets are concrete types the `ui` module knows; a user-defined widget has to go through
   `Program::view` (elements) rather than drawing into the canvas itself. A `Custom` element that gets `(canvas, rect)` is the likely next step.
+
+## GUI backend (2026-11-22)
+
+`src/gui/`, next to the terminal backend: `raster` (cells to pixels with fontdue; box lines and blocks are drawn
+procedurally so they join; only changed cells repaint), `present` (CPU shared memory through softbuffer, or wgpu),
+`tune` (pure policy, unit-tested), `window` (winit loop, input mapping, `drive_gui`), `png` (own writer, stored
+deflate). The `Ui` is unchanged: a backend is "show the grid" plus "turn input into `Event`s".
+
+Self-tuning: CPU first, because a terminal-style frame touches a few cells and a copy beats waking a GPU. After 20
+frames averaging over 6 ms it tries the GPU; after 30 frames it keeps it only if frames are at least 20% cheaper,
+otherwise it goes back and never retries. A GPU that stays under 1 ms for 240 frames goes back to the CPU. Animation
+frame time follows the measured cost (16 ms to 100 ms).
+
+Honest gaps: the GPU path is compiled and falls back correctly but has **never presented a frame** here (Vulkan on this
+Wayland session cannot present, `vkcube` crashes too), so its speed-up is unmeasured and the tuner thresholds are
+guesses. Today the CPU still rasterises glyphs on both paths; the GPU only presents. Real gain needs phase 2
+(glyph atlas on the GPU, pixel-native widgets). Keyboard and mouse mapping is written but was only exercised without
+real input events. Ime commit is delivered as `Paste`. kmscon/VT console support and a web backend are still open.

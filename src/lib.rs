@@ -1,9 +1,12 @@
 pub mod anim;
 pub mod canvas;
+#[cfg(feature = "gui")]
+pub mod gui;
 pub mod headless;
 pub mod input;
 pub mod layout;
 pub mod runtime;
+pub mod session;
 pub mod term;
 pub mod theme;
 pub mod ui;

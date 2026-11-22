@@ -28,18 +28,29 @@ fn wake_raw() {
     }
 }
 
-/// Wakes the loop from any thread (effects, signal handlers). Cheap to clone.
-#[derive(Clone, Copy)]
-pub struct Waker(RawFd);
+/// Wakes the loop from any thread (effects, signal handlers). Cheap to clone. A backend without a poll loop (a window)
+/// brings its own wake-up with `from_fn`.
+#[derive(Clone)]
+pub struct Waker {
+    fd: RawFd,
+    hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+}
 
 impl Waker {
     pub(crate) fn from_fd(fd: RawFd) -> Waker {
-        Waker(fd)
+        Waker { fd, hook: None }
+    }
+    pub fn from_fn(f: impl Fn() + Send + Sync + 'static) -> Waker {
+        Waker { fd: -1, hook: Some(std::sync::Arc::new(f)) }
     }
     pub fn wake(&self) {
+        if let Some(h) = &self.hook {
+            h();
+            return;
+        }
         let b = 1u8;
         unsafe {
-            libc::write(self.0, &b as *const u8 as *const libc::c_void, 1);
+            libc::write(self.fd, &b as *const u8 as *const libc::c_void, 1);
         }
     }
 }
@@ -130,7 +141,7 @@ impl Term {
     }
 
     pub fn waker(&self) -> Waker {
-        Waker(self.wake_w)
+        Waker::from_fd(self.wake_w)
     }
 
     pub fn size(&self) -> (i32, i32) {
