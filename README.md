@@ -93,7 +93,7 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 
 Charts and the like need code, so they are Rust, registered by name (`lazyui widgets ls` lists them with their attributes).
 Data comes from `values="1,2,3"` or `bind=KEY` (a comma list in the model; `ui.push(key, sample, cap)` appends and
-keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table`. They draw with
+keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table sysbar`. They draw with
 block/braille glyphs on a Unicode terminal and with `# = . :` on an ASCII one, so a snapshot is the same everywhere.
 `ringbar` and `spinner` move with the Ui clock (`tick`), never the wall clock.
 
@@ -161,3 +161,12 @@ Two ways to show the same engine in a browser tab, picked by what you mount:
 
 `web/index.html` takes `?skin=grid`, `?flavor=`, `?scheme=`, `?spec=`, `?set=key=value`. `examples/showcase.lui` has every
 widget. `node web/browser-test.mjs` drives the skin in headless Chromium (no npm packages).
+
+### sysbar
+
+One line of vitals: `sysbar items=cpu,mem,swap,disk,net,ping,fps every=1 disk=/ ping=1.1.1.1:53`. The widget keeps its
+numbers in the model (`sys.cpu sys.mem sys.swap sys.disk` percent, `sys.rx sys.tx` bytes/s, `sys.ping` ms, `sys.fps`), so
+the same keys can be read by the program or fed from outside. Natively it samples `/proc` and `statvfs` once a second and
+pings with a TCP connect on a background thread (`ping=off` to disable); `fps` is frames drawn per second. In the browser
+there is no `/proc`: the skin measures fps (animation frames) and the round trip to the page's origin, and anything else
+comes from `ui.feed({cpu: 12, mem: 40})`.

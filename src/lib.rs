@@ -14,6 +14,7 @@ pub mod native;
 pub mod runtime;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod session;
+pub mod sys;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod term;
 pub mod theme;

@@ -32,4 +32,5 @@ col
         list id=files items="alpha,beta,gamma,delta,epsilon,zeta" filter=query icon=file
         tree id=t items="src/main.rs,src/ui.rs,src/web/mod.rs,web/skin.js,README.md" open=1
       dropdown id=theme label="Theme" items="auto,light,dark" bind=pick
+  sysbar ping=off
   keybar hints="tab:focus;ctrl-q:quit"

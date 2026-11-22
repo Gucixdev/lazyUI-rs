@@ -129,6 +129,9 @@ const CSS = `
 .lz .tn{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:calc(var(--r) - 4px);cursor:default;white-space:nowrap}
 .lz .tn:hover{background:var(--hover)}.lz .tn.sel{background:var(--sel)}.lz .tree.focus .tn.sel{background:var(--accent);color:#fff}
 .lz .tn .tw{width:1em;display:inline-grid;place-items:center;opacity:.7}.lz .tn.folder .ic:nth-child(2){color:var(--accent)}.lz .tree.focus .tn.sel .ic{color:inherit}
+.lz .sysbar{display:flex;flex-wrap:wrap;gap:6px 8px}.lz .sysbar.right{justify-content:flex-end}
+.lz .pill{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:3px 11px;font-size:12px;box-shadow:var(--shadow);font-variant-numeric:tabular-nums}
+.lz .pill .pl{color:var(--dim)}.lz .pill b{font-weight:600}.lz .pill em{display:inline-block;width:26px;height:4px;border-radius:99px;background:var(--hover);overflow:hidden}.lz .pill em i{display:block;height:100%;border-radius:99px}
 .lz .unk{color:var(--dim);border:1px dashed var(--line);border-radius:var(--r);padding:6px 10px;font-size:12px}
 `;
 
@@ -304,6 +307,14 @@ function renderCustom(n, dir, sz, st) {
       }).join("");
       return `<div class="tree${foc}" style="${sz}" data-id="${id}" data-cursor="${s.cursor}">${rows}</div>`;
     }
+    case "sysbar": {
+      const pills = (s.items || []).map((it) => {
+        const f = it.frac, c = f == null ? "var(--accent)" : level(f, false);
+        const bar = f == null ? "" : `<em><i style="width:${(f * 100).toFixed(0)}%;background:${c}"></i></em>`;
+        return `<span class="pill" title="${esc(it.name)}"><span class="pl">${esc(it.label)}</span><b style="color:${f == null && it.text.includes("--") ? "var(--dim)" : f == null ? "var(--fg)" : c}">${esc(it.text)}</b>${bar}</span>`;
+      }).join("");
+      return `<div class="sysbar ${esc(a.align || "")}" style="${sz}">${pills}</div>`;
+    }
     default: return `<div class="unk" style="${sz}">${esc(n.kind)}</div>`;
   }
 }
@@ -384,6 +395,7 @@ export async function mountSkin(root, o = {}) {
     const f = root.querySelector(".search.focus input");
     if (f && f !== document.activeElement && (root.contains(document.activeElement) || document.activeElement === document.body)) f.focus({ preventScroll: true });
     clocks();
+    if (root.querySelector(".sysbar")) startFeed();
   }
 
   function pump() {
@@ -408,6 +420,25 @@ export async function mountSkin(root, o = {}) {
   }
 
   const clockTimer = setInterval(clocks, 1000);
+
+  // what the browser can measure for a sysbar: real animation frames per second and the round trip to this origin.
+  // Everything else (cpu, mem, swap, disk, net) stays "--" until the page calls ui.feed({cpu: 12, ...}).
+  let feeding = false, feedStop = () => {};
+  function feed(vals) { for (const [k, v] of Object.entries(vals)) { const key = k.startsWith("sys.") ? k : "sys." + k; const [a, an] = put(key), [b, bn] = put(String(v)); x.lz_set(a, an, b, bn); x.lz_free(a, an); x.lz_free(b, bn); } pump(); }
+  function startFeed() {
+    if (feeding || o.sys === false) return;
+    feeding = true;
+    let frames = 0, t0 = performance.now(), r = 0, stop = false;
+    const loop = () => { frames++; if (!stop) r = requestAnimationFrame(loop); };
+    r = requestAnimationFrame(loop);
+    const fpsT = setInterval(() => { const t = performance.now(); feed({ fps: frames / ((t - t0) / 1000) }); frames = 0; t0 = t; }, 1000);
+    const ping = async () => {
+      const t = performance.now();
+      try { await fetch(o.ping || location.pathname, { method: "HEAD", cache: "no-store" }); feed({ ping: performance.now() - t }); } catch { feed({ ping: -1 }); }
+    };
+    ping(); const pingT = setInterval(ping, 2000);
+    feedStop = () => { stop = true; cancelAnimationFrame(r); clearInterval(fpsT); clearInterval(pingT); };
+  }
 
   const sendKey = (name) => { const ok = call(x.lz_key, name) === 1; pump(); return ok; };
   root.addEventListener("click", (e) => {
@@ -468,7 +499,8 @@ export async function mountSkin(root, o = {}) {
     scheme(m) { mode = m; applyScheme(); },
     flavor(f) { root.dataset.flavor = f; },
     accent(c) { root.style.setProperty("--accent", c); },
+    feed,
     describe() { return JSON.parse(read(x.lz_describe())); },
-    destroy() { dead = true; clearTimeout(timer); cancelAnimationFrame(raf); clearInterval(clockTimer); },
+    destroy() { dead = true; clearTimeout(timer); cancelAnimationFrame(raf); clearInterval(clockTimer); feedStop(); },
   };
 }
