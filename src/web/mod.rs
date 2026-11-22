@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn the_page_can_hand_over_its_own_widgets() {
         let mut ws = Widgets::builtin();
-        ws.add_source("hello", "params who=world\ntext text=\"hi $who\"\n", Scope::Global, "page").unwrap();
+        ws.add_source("hello", "params who=world\ntext text=\"hi $who\"\n", crate::components::Scope::Global, "page").unwrap();
         let mut w = Web::with_widgets("col\n  hello who=you\n  meter label=a bind=x\n", ws).unwrap();
         w.resize(20, 3);
         w.render();
