@@ -1,31 +1,24 @@
-pub mod anim;
-pub mod canvas;
-pub mod bars;
-pub mod charts;
-pub mod fancy;
-pub mod pickers;
 pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;
-pub mod gfx;
 pub mod headless;
 pub mod input;
 pub mod layout;
 pub mod lists;
-pub mod maps;
 pub mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod session;
 pub mod sys;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod term;
-pub mod theme;
-pub mod timers;
 pub mod ui;
 #[cfg(feature = "web")]
 pub mod web;
+pub mod fx;
 pub mod widgets;
-pub mod world;
-pub mod worlddata;
+
+// the old flat paths (`lazyui::canvas`, `lazyui::gfx`, ...) keep working
+pub use fx::{anim, fancy, gfx};
+#[cfg(not(target_arch = "wasm32"))]
+pub use widgets::session;
+pub use widgets::{bars, canvas, charts, maps, pickers, theme, timers, world, worlddata};
