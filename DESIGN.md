@@ -127,3 +127,13 @@ events; `lz_wake_ms` tells it to sleep (-1), use rAF (animating) or one timeout 
 Verified: 9 native tests of `Web`, `node web/test.mjs` on the built `.wasm`, and headless Chromium over CDP (render,
 typing + filter, click, `set`, screenshot). Not verified: Firefox/Safari, touch and IME (no hidden text input yet, so
 phones cannot type), high-DPI beyond a scale factor of 1, wide (CJK) glyphs are drawn one cell wide.
+
+## Shared widgets (2026-11-22)
+
+`src/components.rs`: text expansion before parsing, so the parser and every backend are unchanged and errors keep their
+place (`meter line 3 (used at line 7): ...`). One format for three scopes (builtin / global / local) and for the page.
+Not a code plugin system: a widget that needs logic (charts, pickers) is native Rust, registered in the crate; a widget
+that is a composition of existing elements is a file anyone can share. Online sharing is just `widgets add URL` (curl,
+256 KB limit, never overwrites); there is no index or registry server. Gaps: no versioning or checksums of downloaded
+widgets (they are data, but a spec can still show text you did not expect), no `$` escape, values with a double quote
+are refused, a component cannot take attributes for inner elements other than through parameters.

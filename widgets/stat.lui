@@ -1,0 +1,5 @@
+# a name and a value on one line, the value bound to a model key
+params label bind
+row
+  text text="$label" size=14 style=dim
+  text bind=$bind

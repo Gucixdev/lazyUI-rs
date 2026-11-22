@@ -1,0 +1,3 @@
+# one accent-coloured line of text, centred
+params text
+text text="$text" style=accent align=center size=1

@@ -7,6 +7,7 @@ use std::cell::RefCell;
 thread_local! {
     static APP: RefCell<Option<Web>> = const { RefCell::new(None) };
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static WIDGETS: RefCell<crate::components::Widgets> = RefCell::new(crate::components::Widgets::builtin());
     static ERR: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
@@ -24,6 +25,19 @@ fn fail(e: String) -> i32 {
 
 unsafe fn s<'a>(p: *const u8, n: usize) -> &'a str {
     std::str::from_utf8(std::slice::from_raw_parts(p, n)).unwrap_or("")
+}
+
+/// Register a component before `lz_init` (name and text as UTF-8). 1 when accepted, else the reason is in `lz_error`.
+///
+/// # Safety
+/// Both pairs are readable UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn lz_widget(np: *const u8, nn: usize, tp: *const u8, tn: usize) -> i32 {
+    let name = s(np, nn);
+    match WIDGETS.with(|w| w.borrow_mut().add_source(name, s(tp, tn), crate::components::Scope::Global, "page")) {
+        Ok(()) => 1,
+        Err(e) => fail(e),
+    }
 }
 
 #[no_mangle]
@@ -45,7 +59,7 @@ pub unsafe extern "C" fn lz_free(p: *mut u8, n: usize) {
 /// `p`/`n` is a readable UTF-8 spec.
 #[no_mangle]
 pub unsafe extern "C" fn lz_init(p: *const u8, n: usize) -> i32 {
-    match Web::new(s(p, n)) {
+    match Web::with_widgets(s(p, n), WIDGETS.with(|w| w.borrow().clone())) {
         Ok(w) => {
             APP.with(|a| *a.borrow_mut() = Some(w));
             1

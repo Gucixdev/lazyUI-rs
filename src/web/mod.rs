@@ -7,6 +7,7 @@
 //! Colour words: 0 = the page default, `0x01000000 | n` = palette index n, `0x02000000 | 0xRRGGBB` = true colour.
 
 use crate::canvas::{Canvas, Caps, Color};
+use crate::components::{Scope, Widgets};
 use crate::input::{parse_key, Event, Mods, MouseKind};
 use crate::theme::Theme;
 use crate::ui::Ui;
@@ -40,7 +41,12 @@ fn mods_of(bits: u32) -> Mods {
 
 impl Web {
     pub fn new(spec: &str) -> Result<Web, String> {
-        Ok(Web { ui: Ui::from_spec(spec)?, w: 80, h: 24, frame: Vec::new(), events: String::new(), error: String::new() })
+        Web::with_widgets(spec, Widgets::builtin())
+    }
+
+    /// With extra components (the page has no folders: it hands them over by name).
+    pub fn with_widgets(spec: &str, widgets: Widgets) -> Result<Web, String> {
+        Ok(Web { ui: Ui::from_spec_with(spec, widgets)?, w: 80, h: 24, frame: Vec::new(), events: String::new(), error: String::new() })
     }
 
     /// Replace the spec, keeping the model values; a bad spec keeps the old UI and reports why.
@@ -297,6 +303,17 @@ mod tests {
         w.every(1.0, "beat");
         w.tick(3200.0);
         assert_eq!(w.take_events().matches("\"kind\":\"beat\"").count(), 3);
+    }
+
+    #[test]
+    fn the_page_can_hand_over_its_own_widgets() {
+        let mut ws = Widgets::builtin();
+        ws.add_source("hello", "params who=world\ntext text=\"hi $who\"\n", Scope::Global, "page").unwrap();
+        let mut w = Web::with_widgets("col\n  hello who=you\n  meter label=a bind=x\n", ws).unwrap();
+        w.resize(20, 3);
+        w.render();
+        assert!(w.frame_text().starts_with("hi you"), "{}", w.frame_text());
+        assert!(w.reload("col\n  hello\n").is_ok(), "reload keeps the page's widgets");
     }
 
     #[test]

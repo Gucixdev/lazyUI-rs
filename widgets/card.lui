@@ -1,0 +1,4 @@
+# a bordered box with a title around whatever is written under it
+params title=""
+panel title="$title"
+  slot

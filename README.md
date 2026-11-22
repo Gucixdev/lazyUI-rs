@@ -89,6 +89,25 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 `theme` data themes, `input` byte decoder (utf-8, CSI, SGR mouse, paste), `widgets`, `ui` tree + spec + model + focus,
 `headless`, `term` raw mode via libc, `runtime` the loop.
 
+## Shared widgets
+
+A widget is a spec file with parameters, used by its file name:
+
+```text
+# meter.lui
+params label bind max=100
+row
+  text text="$label" size=8 style=dim
+  progressbar bind=$bind max=$max
+```
+
+`meter label=CPU bind=cpu` in any spec. `$name` is replaced by the use-site value (or the default), other attributes
+(`size`, `id`...) go on the root, a `slot` line takes the children written under the use. Where they live, later wins:
+**builtin** (compiled in, works offline: `card meter stat titlebar statusbar`), **global** (`$LAZYUI_WIDGETS` or
+`~/.config/lazyui/widgets`, shared by every program; `lazyui widgets add URL|FILE` fetches into it), **local**
+(`widgets/` next to the spec, `./widgets`, `--widgets DIR`). `lazyui widgets ls|show|dirs`. In the browser the page hands
+its widgets over: `mount(canvas, { widgets: { name: text } })`. The format is plain text on purpose: lazytui (C) can read it.
+
 ## Window (feature `gui`, on by default)
 
 `lazyui run SPEC --gui` is the same spec and the same pipes in a window; `lazyui snap SPEC --png out.png` renders the

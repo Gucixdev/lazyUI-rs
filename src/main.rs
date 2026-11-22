@@ -20,6 +20,7 @@ usage:
   lazyui script SPEC FILE|-        run a script (see below), print what it prints, exit 1 on a failed expect
   lazyui select SPEC QUERY         find elements: #id, kind (list) or ~text; prints id kind x y w h
   lazyui themes                    list the built-in themes
+  lazyui widgets ls|dirs|show NAME|add SRC [NAME]   shared widgets (see below)
 
 options:
   --size WxH         headless size (default 80x24)
@@ -34,6 +35,7 @@ options:
   --render MODE      gui: auto (default: CPU, GPU when frames measure slow and it helps) | cpu | gpu
   --font FILE.ttf    gui/--png: monospace font (default: DejaVu Sans Mono via fontconfig)
   --font-px N        gui/--png: font size in logical pixels (default 17)
+  --widgets DIR      a folder of extra widget files (*.lui), counted as local (repeatable)
   --png FILE         snap: also write the frame as a PNG rendered with the window's rasteriser
 
 run talks on the pipes while the UI is on /dev/tty:
@@ -43,6 +45,11 @@ run talks on the pipes while the UI is on /dev/tty:
 script commands: size W H, set k=v, key NAME.., type TEXT, paste TEXT, click X Y, wheel X Y up|down, tick SEC,
   hotkey KEY NAME, every SEC NAME, focus ID, snap, tree, events,
   expect text \"..\" | no-text \"..\" | row N \"..\" | focus ID | model KEY VALUE | event ID KIND [TEXT]
+
+widgets: a widget is a spec file with parameters (`params label bind max=100`, `$label` in the body, `slot` for children),
+  used by its file name: `meter label=CPU bind=cpu`. Looked up in this order, later wins: built-in (compiled in, offline),
+  global ($LAZYUI_WIDGETS or ~/.config/lazyui/widgets; `widgets add URL|FILE` downloads here), local (widgets/ next to
+  the spec, ./widgets, --widgets DIR). `widgets ls` shows what is visible and where each came from.
 
 spec: indented elements, `kind attr=value attr=\"with spaces\"`; kinds: row col panel pages spacer text progressbar
   searchbar buttonbar list keybar. Sizes: size=N|fill|fill:W|pct:P|min:N|max:N.
@@ -64,6 +71,7 @@ struct Args {
     font: Option<String>,
     font_px: f32,
     png: Option<String>,
+    widget_dirs: Vec<std::path::PathBuf>,
 }
 
 fn die(msg: &str) -> ! {
@@ -77,7 +85,7 @@ fn parse_args() -> Args {
         print!("{HELP}");
         exit(0)
     });
-    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None };
+    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None, widget_dirs: vec![] };
     let mut rest: Vec<String> = it.collect();
     rest.reverse();
     while let Some(x) = rest.pop() {
@@ -112,6 +120,7 @@ fn parse_args() -> Args {
             "--font" => a.font = Some(val("--font")),
             "--font-px" => a.font_px = val("--font-px").parse().unwrap_or_else(|_| die("--font-px N")),
             "--png" => a.png = Some(val("--png")),
+            "--widgets" => a.widget_dirs.push(val("--widgets").into()),
             "-h" | "--help" | "help" => {
                 print!("{HELP}");
                 exit(0)
@@ -131,7 +140,12 @@ fn load_ui(a: &Args, spec_path: &str) -> Ui {
     } else {
         std::fs::read_to_string(spec_path).unwrap_or_else(|e| die(&format!("{spec_path}: {e}")))
     };
-    let mut ui = Ui::from_spec(&src).unwrap_or_else(|e| {
+    let spec_dir = if spec_path == "-" { None } else { std::path::Path::new(spec_path).parent().map(|p| p.to_path_buf()) };
+    let (widgets, problems) = lazyui::components::Widgets::standard(spec_dir.as_deref(), &a.widget_dirs);
+    for p in problems {
+        eprintln!("lazyui: widget skipped: {p}");
+    }
+    let mut ui = Ui::from_spec_with(&src, widgets).unwrap_or_else(|e| {
         eprintln!("{spec_path}: {e}");
         exit(1)
     });
@@ -150,9 +164,64 @@ fn load_ui(a: &Args, spec_path: &str) -> Ui {
     ui
 }
 
+fn widgets_cmd(a: &Args) {
+    use lazyui::components::{global_dir, Scope, Widgets};
+    let spec_dir = std::path::PathBuf::from(".");
+    let (w, problems) = Widgets::standard(Some(&spec_dir), &a.widget_dirs);
+    match a.pos.first().map(|s| s.as_str()).unwrap_or("ls") {
+        "ls" => {
+            for c in w.names() {
+                let params: Vec<String> = Widgets::param_list(c).into_iter().map(|(k, d)| match d { Some(d) => format!("{k}={d}"), None => k }).collect();
+                println!("{:<14} {:<8} {}  [{}]", c.name, c.scope.name(), c.doc, params.join(" "));
+            }
+            for p in problems {
+                eprintln!("skipped: {p}");
+            }
+        }
+        "dirs" => {
+            println!("builtin  (compiled in)");
+            println!("global   {}", global_dir().map(|d| d.display().to_string()).unwrap_or_else(|| "(no HOME)".into()));
+            println!("local    ./widgets, widgets/ next to the spec, --widgets DIR");
+        }
+        "show" => {
+            let n = a.pos.get(1).unwrap_or_else(|| die("widgets show NAME"));
+            let c = w.get(n).unwrap_or_else(|| die(&format!("no widget named `{n}` (lazyui widgets ls)")));
+            eprintln!("# {} ({}, {})", c.name, c.scope.name(), c.origin);
+            print!("{}", c.text);
+        }
+        "add" => {
+            let src = a.pos.get(1).unwrap_or_else(|| die("widgets add URL|FILE [NAME]"));
+            let text = if src.starts_with("http://") || src.starts_with("https://") {
+                let o = std::process::Command::new("curl").args(["-fsSL", "--max-time", "20", "--max-filesize", "262144", src]).output().unwrap_or_else(|e| die(&format!("curl: {e}")));
+                if !o.status.success() {
+                    die(&format!("could not download {src}"));
+                }
+                String::from_utf8(o.stdout).unwrap_or_else(|_| die("the download is not text"))
+            } else {
+                std::fs::read_to_string(src).unwrap_or_else(|e| die(&format!("{src}: {e}")))
+            };
+            let name = a.pos.get(2).cloned().unwrap_or_else(|| {
+                let last = src.rsplit('/').next().unwrap_or("");
+                last.strip_suffix(".lui").unwrap_or(last).to_string()
+            });
+            Widgets::empty().add_source(&name, &text, Scope::Global, src).unwrap_or_else(|e| die(&e));
+            let dir = global_dir().unwrap_or_else(|| die("no global folder: set LAZYUI_WIDGETS or HOME"));
+            let to = dir.join(format!("{name}.lui"));
+            if to.exists() {
+                die(&format!("{} already exists; move it away first (nothing is overwritten)", to.display()));
+            }
+            std::fs::create_dir_all(&dir).unwrap_or_else(|e| die(&format!("{}: {e}", dir.display())));
+            std::fs::write(&to, text).unwrap_or_else(|e| die(&format!("{}: {e}", to.display())));
+            println!("{name} -> {}", to.display());
+        }
+        other => die(&format!("widgets: unknown subcommand `{other}` (ls, dirs, show NAME, add SRC [NAME])")),
+    }
+}
+
 fn main() {
     let a = parse_args();
     match a.cmd.as_str() {
+        "widgets" => widgets_cmd(&a),
         "themes" => {
             for n in ["green", "matrix", "light"] {
                 println!("{n}");

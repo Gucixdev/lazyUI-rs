@@ -1,0 +1,3 @@
+# the keybar with the hints given as one attribute: statusbar hints="tab:focus;ctrl-q:quit"
+params hints
+keybar hints="$hints"

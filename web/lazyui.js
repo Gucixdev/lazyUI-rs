@@ -2,7 +2,7 @@
 // DOM events into lazyui events. No dependencies, no build step. See README "Web".
 //
 //   import { mount } from "./lazyui.js";
-//   const ui = await mount(canvas, { wasm: "lazyui.wasm", spec: "col\n  text text=hi" });
+//   const ui = await mount(canvas, { wasm: "lazyui.wasm", spec, widgets: { mycard: "params t\npanel title=$t\n  slot" } });
 //   ui.set("cpu", 42); ui.on("activate", e => ...); ui.key("ctrl-r"); ui.theme("green"); ui.reload(newSpec);
 
 const CELL_WORDS = 4;
@@ -64,6 +64,11 @@ export async function mount(canvas, o = {}) {
     paintAll = true;
   }
 
+  for (const [name, text] of Object.entries(o.widgets || {})) {
+    const [a, an] = put(name), [b, bn] = put(text);
+    const ok = x.lz_widget(a, an, b, bn); x.lz_free(a, an); x.lz_free(b, bn);
+    if (ok !== 1) throw new Error(`lazyui widget ${name}: ` + err());
+  }
   if (call(x.lz_init, o.spec || "text text=\"no spec\"") !== 1) throw new Error("lazyui spec: " + err());
   if (o.theme) call(x.lz_theme, o.theme);
   metrics();

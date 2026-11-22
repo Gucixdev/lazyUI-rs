@@ -1,0 +1,5 @@
+# a labelled progress bar: label, a model key to bind and its maximum
+params label bind max=100
+row
+  text text="$label" size=8 style=dim
+  progressbar bind=$bind max=$max

@@ -138,40 +138,50 @@ pub fn spacer() -> El {
 
 /// Indented text, one element per line: `kind attr=value attr="quoted value"`. Errors carry the line number.
 pub fn parse_spec(src: &str) -> Result<El, String> {
+    parse_lines(crate::components::plain_lines(src), None)
+}
+
+/// `parse_spec` with components: every use of a named widget in `widgets` is expanded first.
+pub fn parse_spec_with(src: &str, widgets: &crate::components::Widgets) -> Result<El, String> {
+    let lines = crate::components::plain_lines(src);
+    parse_lines(widgets.expand(lines)?, Some(widgets))
+}
+
+fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::components::Widgets>) -> Result<El, String> {
     let mut stack: Vec<(usize, El)> = Vec::new(); // (indent, element being built)
     let mut root: Option<El> = None;
-    for (n, raw) in src.lines().enumerate() {
-        let n = n + 1;
-        let body = raw.trim_end();
+    for sl in lines.iter() {
+        let n = sl.label.as_str();
+        let body = sl.text.trim_end();
         let trimmed = body.trim_start();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
         if body.contains('\t') && body[..body.len() - trimmed.len()].contains('\t') {
-            return Err(format!("line {n}: tabs in the indent, use spaces"));
+            return Err(format!("{n}: tabs in the indent, use spaces"));
         }
         let indent = body.len() - trimmed.len();
-        let toks = tokenize(trimmed).map_err(|e| format!("line {n}: {e}"))?;
-        let (kind_s, rest) = toks.split_first().ok_or_else(|| format!("line {n}: empty element"))?;
+        let toks = tokenize(trimmed).map_err(|e| format!("{n}: {e}"))?;
+        let (kind_s, rest) = toks.split_first().ok_or_else(|| format!("{n}: empty element"))?;
         if kind_s.contains('=') {
-            return Err(format!("line {n}: expected an element kind first, got `{kind_s}`"));
+            return Err(format!("{n}: expected an element kind first, got `{kind_s}`"));
         }
         let kind = Kind::parse(kind_s).ok_or_else(|| {
             let known = ["ringbar", "zonebar", "pacmanbar", "dropdown", "tree", "scroll", "rain", "custom", "stack"];
             if known.contains(&kind_s.as_str()) {
-                format!("line {n}: `{kind_s}` exists in lazytui (C) but not in lazyui yet")
+                format!("{n}: `{kind_s}` exists in lazytui (C) but not in lazyui yet")
             } else {
-                format!("line {n}: unknown element `{kind_s}`")
+                format!("{n}: unknown element `{kind_s}`")
             }
         })?;
         let mut el = El::new(kind);
         for t in rest {
-            let (k, v) = t.split_once('=').ok_or_else(|| format!("line {n}: `{t}` is not key=value"))?;
+            let (k, v) = t.split_once('=').ok_or_else(|| format!("{n}: `{t}` is not key=value"))?;
             if k.is_empty() {
-                return Err(format!("line {n}: empty attribute name"));
+                return Err(format!("{n}: empty attribute name"));
             }
             if k == "size" && Size::parse(v).is_none() {
-                return Err(format!("line {n}: size `{v}` is not N, fill, fill:W, pct:P, min:N or max:N"));
+                return Err(format!("{n}: size `{v}` is not N, fill, fill:W, pct:P, min:N or max:N"));
             }
             el.attrs.insert(k.to_string(), v.to_string());
         }
@@ -179,19 +189,19 @@ pub fn parse_spec(src: &str) -> Result<El, String> {
         while let Some((i, _)) = stack.last() {
             if *i >= indent {
                 let (_, done) = stack.pop().unwrap();
-                attach(&mut stack, &mut root, done, n)?;
+                attach(&mut stack, &mut root, done, 0)?;
             } else {
                 break;
             }
         }
         if let Some((_, parent)) = stack.last() {
             if !parent.kind.container() {
-                return Err(format!("line {n}: `{}` cannot hold children", parent.kind.name()));
+                return Err(format!("{n}: `{}` cannot hold children", parent.kind.name()));
             }
         } else if root.is_some() {
-            return Err(format!("line {n}: a second top-level element (a spec has one root)"));
+            return Err(format!("{n}: a second top-level element (a spec has one root)"));
         } else if indent != 0 {
-            return Err(format!("line {n}: the root must not be indented"));
+            return Err(format!("{n}: the root must not be indented"));
         }
         stack.push((indent, el));
     }
@@ -210,7 +220,7 @@ fn attach(stack: &mut [(usize, El)], root: &mut Option<El>, done: El, _line: usi
     Ok(())
 }
 
-fn tokenize(s: &str) -> Result<Vec<String>, String> {
+pub(crate) fn tokenize(s: &str) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quoted = false;
@@ -317,6 +327,7 @@ struct Placed {
 
 pub struct Ui {
     root: El,
+    widgets: crate::components::Widgets,
     pub theme: Theme,
     model: HashMap<String, Value>,
     states: HashMap<String, WState>,
@@ -335,6 +346,7 @@ impl Ui {
     pub fn new(root: El) -> Ui {
         Ui {
             root,
+            widgets: crate::components::Widgets::builtin(),
             theme: Theme::green(),
             model: HashMap::new(),
             states: HashMap::new(),
@@ -349,8 +361,19 @@ impl Ui {
             dirty: true,
         }
     }
+    /// Parse with the built-in components (`card`, `meter`, ...).
     pub fn from_spec(src: &str) -> Result<Ui, String> {
-        Ok(Ui::new(parse_spec(src)?))
+        Ui::from_spec_with(src, crate::components::Widgets::builtin())
+    }
+    /// Parse with a chosen set of components (builtin + global + local, see `components`). Kept for `reload_spec`.
+    pub fn from_spec_with(src: &str, widgets: crate::components::Widgets) -> Result<Ui, String> {
+        let root = parse_spec_with(src, &widgets)?;
+        let mut ui = Ui::new(root);
+        ui.widgets = widgets;
+        Ok(ui)
+    }
+    pub fn widgets(&self) -> &crate::components::Widgets {
+        &self.widgets
     }
     /// Swap the tree (e.g. a new `view` result). State of elements with the same id (list cursor, input text) survives.
     pub fn set_tree(&mut self, root: El) {
@@ -359,7 +382,7 @@ impl Ui {
     }
     /// Re-load a spec keeping model, state and focus; on an error nothing changes.
     pub fn reload_spec(&mut self, src: &str) -> Result<(), String> {
-        let root = parse_spec(src)?;
+        let root = parse_spec_with(src, &self.widgets)?;
         self.set_tree(root);
         Ok(())
     }

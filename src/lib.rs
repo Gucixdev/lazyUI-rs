@@ -1,5 +1,6 @@
 pub mod anim;
 pub mod canvas;
+pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod headless;
