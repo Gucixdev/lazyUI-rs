@@ -1,6 +1,6 @@
 # every widget in one place; the browser shows it as an app, the terminal as a grid
 col
-  buttonbar id=tabs items="overview,data,files,world,fancy" icons="home,chart,folder,globe,star" active=tab
+  buttonbar id=tabs items="overview,data,files,world,fancy,audio" icons="home,chart,folder,globe,star,speaker" active=tab
   pages bind=tab
     col
       row
@@ -55,5 +55,18 @@ col
           piechart values="5,3,2,1" labels="rust,c,go,mojo" donut=1
         panel title="Tags" size=fill
           tagcloud words="rust,c89,wasm,springs,glass,tui,lean4,mojo,godot" weights="9,7,6,8,3,5,4,2,6"
+    col
+      panel title="Volume" icon=speaker
+        volumebar label=spk bind=vol value=0.6 muted=mute
+        volumebar label=mic bind=mic value=0.25 max=1.5
+      panel title="Download" icon=down
+        pacmanbar name="linux-6.12.arch1-1" done=22020096 total=44040192 rate=4351590 eta=5
+      row
+        panel title="Cores" size=fill
+          corebars labels="c0,c1,c2,c3" values="12.5,48,71,92" infos="3400MHz,3200MHz,3100MHz,2900MHz"
+        panel title="Rates" size=fill
+          ratepanel labels="eth0 rx,eth0 tx,nvme0" values="1200000,40000,52428800" peaks="3000000,100000,104857600"
+      panel title="Dither" size=fill
+        heatdither values="1,3,2,5,8,4,9,2,6,7,3,1" cols=4 cell=3
   sysbar ping=off
   keybar hints="tab:focus;ctrl-q:quit"

@@ -225,4 +225,21 @@ export const CSS = `
 @keyframes lz-spin{to{transform:rotate(360deg)}}@keyframes lz-blip{0%{opacity:1}100%{opacity:.06}}
 .lz .rain{position:relative;border-radius:var(--r2);overflow:hidden;background:#050a07;border:1px solid var(--line);min-height:80px;flex:1}.lz .rain canvas{position:absolute;inset:0;width:100%;height:100%}
 .lz .scr{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;letter-spacing:.04em;white-space:pre;overflow:hidden}.lz .scr b{font-weight:700}.lz .scr i{font-style:normal;color:var(--dim)}.lz .scr i.cur{color:var(--on);background:var(--accent)}
+.lz .vol{display:flex;align-items:center;gap:10px;min-height:30px}.lz .vol .lab{color:var(--dim);min-width:3ch}.lz .vol .val{min-width:4.5ch;text-align:right;font-variant-numeric:tabular-nums}
+.lz .vol.muted .val{color:var(--dim);font-weight:700}.lz .vol.focus input{outline:2px solid var(--sel);outline-offset:4px;border-radius:99px}
+.lz .vol input[type=range]{flex:1;min-width:60px;height:6px;appearance:none;-webkit-appearance:none;border-radius:99px;background:linear-gradient(to right,var(--accent) var(--f),var(--line) var(--f));outline-offset:4px;cursor:pointer}
+.lz .vol.muted input[type=range]{background:linear-gradient(to right,var(--dim) var(--f),var(--line) var(--f))}
+.lz .vol input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--card);border:2px solid var(--accent);box-shadow:var(--shadow)}
+.lz .vol input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--card);border:2px solid var(--accent)}
+.lz .vol.v{flex-direction:column;height:100%;min-height:120px}.lz .vol.v input[type=range]{writing-mode:vertical-lr;direction:rtl;width:6px;height:auto;flex:1;background:linear-gradient(to top,var(--accent) var(--f),var(--line) var(--f))}
+.lz .pac{display:flex;align-items:center;gap:12px;font-size:12px;min-height:26px}.lz .pac .nm{font-weight:600;min-width:8ch}.lz .pac .inf{color:var(--dim);white-space:nowrap}.lz .pac .pc{min-width:4ch;text-align:right}
+.lz .pac .trk{position:relative;flex:1;height:14px}
+.lz .pac .trk::before{content:"";position:absolute;inset:0;background:radial-gradient(circle,var(--dim) 2px,transparent 2.5px) 0 50%/18px 14px repeat-x;-webkit-mask:linear-gradient(to right,transparent var(--f),#000 var(--f));mask:linear-gradient(to right,transparent var(--f),#000 var(--f))}
+.lz .pac .eat{display:none}
+.lz .pac .mouth{position:absolute;top:-2px;width:18px;height:18px;margin-left:-9px;border-radius:50%;background:var(--warn);clip-path:polygon(100% 20%,50% 50%,100% 80%,100% 100%,0 100%,0 0,100% 0);animation:lz-chomp .35s steps(2) infinite}
+@keyframes lz-chomp{50%{clip-path:polygon(100% 45%,50% 50%,100% 55%,100% 100%,0 100%,0 0,100% 0)}}
+.lz .cores{display:flex;flex-direction:column;gap:6px;font-size:12px}.lz .cr{display:grid;grid-template-columns:4.5ch 6ch 1fr minmax(40px,120px);gap:10px;align-items:center}
+.lz .cr .l{color:var(--dim)}.lz .cr b{font-variant-numeric:tabular-nums;text-align:right}.lz .cr .i{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lz .rates .cr{grid-template-columns:8ch 9ch 1fr minmax(40px,160px)}
+.lz .cr .trk{height:8px;border-radius:99px;background:var(--line);overflow:hidden}.lz .cr .trk i{display:block;height:100%;border-radius:99px;background:var(--c)}
 `;

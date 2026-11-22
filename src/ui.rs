@@ -176,7 +176,7 @@ fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::compon
             return Err(format!("{n}: expected an element kind first, got `{kind_s}`"));
         }
         let kind = Kind::parse(kind_s).ok_or_else(|| {
-            let known = ["pacmanbar", "scroll", "rain", "custom", "stack"];
+            let known = ["scroll", "custom", "stack", "colorpicker", "datepicker", "timepicker", "filepicker", "gradientpicker", "sequencer", "nodeeditor", "pixeleditor"];
             if known.contains(&kind_s.as_str()) {
                 format!("{n}: `{kind_s}` exists in lazytui (C) but not in lazyui yet")
             } else {
@@ -1308,7 +1308,7 @@ col
     #[test]
     fn spec_errors_carry_the_line() {
         assert_eq!(parse_spec("col\n  wat\n").unwrap_err(), "line 2: unknown element `wat`");
-        assert_eq!(parse_spec("col\n  pacmanbar\n").unwrap_err(), "line 2: `pacmanbar` exists in lazytui (C) but not in lazyui yet");
+        assert_eq!(parse_spec("col\n  sequencer\n").unwrap_err(), "line 2: `sequencer` exists in lazytui (C) but not in lazyui yet");
         assert!(parse_spec("col\n  text text=\"open\n").unwrap_err().starts_with("line 2: a quote"));
         assert!(parse_spec("col\n  text size=big\n").unwrap_err().starts_with("line 2: size"));
         assert!(parse_spec("text\n  text\n").unwrap_err().contains("cannot hold children"));

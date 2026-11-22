@@ -1,5 +1,6 @@
 pub mod anim;
 pub mod canvas;
+pub mod bars;
 pub mod charts;
 pub mod fancy;
 pub mod components;

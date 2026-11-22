@@ -212,3 +212,12 @@ resolves text out of random glyphs; `tagcloud words weights`; `webchart values l
 donut=1 legend=0`. In the terminal round shapes are braille wires and half-block fills; in the browser they are SVG/CSS (radar
 sweep and blip fade are CSS animations with delays computed from the bearing) and, for the two that never rest, `web/fancy.js`
 runs one frame loop that sleeps when no rain or scramble is on the page.
+
+### volumebar, pacmanbar, heatdither, corebars, ratepanel
+
+More lazytui bars (`src/bars.rs`). `volumebar label bind=KEY value max=1 step=0.05 vertical=1 muted=KEY` is interactive: arrows,
+PgUp/PgDn, Home/End, `m` mutes, click/drag/wheel on the bar, click the percent to mute; it emits `change` and `mute` and writes
+`bind`/`muted`. In the browser it is a styled range slider with a mute button. `pacmanbar name done total rate eta` is pacman's own
+`-Sy` line with the same arithmetic (the mouth chomps as the hash advances; a chomping Pac-Man eats the dots on the web).
+`heatdither` is the heat grid as ordered-dither braille. `corebars labels values infos` and `ratepanel labels values peaks` are
+monitor rows with a load bar (green/yellow/red by percent).

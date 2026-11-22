@@ -40,6 +40,8 @@ const ICON = {
   terminal: "M4 5h16v14H4zM7 9l3 3-3 3M12 15h5",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
   keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
+  speaker: "M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11",
+  mute: "M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18",
 };
 const icon = (n, cls = "") => (ICON[n] ? `<svg class="ic ${cls}" viewBox="0 0 24 24"><path d="${ICON[n]}"/></svg>` : "");
@@ -64,7 +66,7 @@ function styleOnce() {
 
 // ---- tree -> HTML -------------------------------------------------------------------------------------------------
 
-const ONE_ROW = new Set(["scramble", "text", "progressbar", "searchbar", "buttonbar", "keybar", "gauge", "ringbar", "spinner", "clock", "timer", "dropdown", "segbar"]);
+const ONE_ROW = new Set(["volumebar", "pacmanbar", "scramble", "text", "progressbar", "searchbar", "buttonbar", "keybar", "gauge", "ringbar", "spinner", "clock", "timer", "dropdown", "segbar"]);
 const CELL_H = 22;
 
 // does this subtree want the leftover space? (a list does, a row of one-line widgets does not)
@@ -175,7 +177,7 @@ function renderCustom(n, dir, sz, st) {
       const bars = cnt.map((c, i) => `<rect x="${(i * bw + 0.8).toFixed(2)}" y="${(92 - c / m * 86).toFixed(2)}" width="${(bw - 1.6).toFixed(2)}" height="${(c / m * 86).toFixed(2)}" rx="1.5" fill="${col}"/>${a.show ? `<text x="${(i * bw + bw / 2).toFixed(2)}" y="${(89 - c / m * 86).toFixed(2)}" text-anchor="middle" style="font-size:4px">${c || ""}</text>` : ""}`).join("");
       return `<div class="chart" style="${sz};height:${Math.max(H, 90)}px"><svg class="chart" viewBox="0 0 100 100" preserveAspectRatio="none" style="height:100%">${bars}</svg></div>`;
     }
-    case "heatgrid": {
+    case "heatgrid": case "heatdither": {
       const c = Math.max(1, num(a.cols, Math.ceil(Math.sqrt(series.length)))), r = Math.ceil(series.length / c) || 1;
       const cells = series.map((v, i) => `<rect x="${(i % c) * 10}" y="${Math.floor(i / c) * 10}" width="9" height="9" rx="2" fill="${col}" opacity="${(0.08 + 0.92 * norm(v)).toFixed(2)}"/>`).join("");
       return `<div class="chart" style="${sz};height:${Math.max(H, r * 18)}px"><svg class="chart" viewBox="0 0 ${c * 10} ${r * 10}" preserveAspectRatio="xMinYMin meet" style="height:100%">${cells}</svg></div>`;
@@ -234,6 +236,25 @@ function renderCustom(n, dir, sz, st) {
         return `<span class="pill" title="${esc(it.name)}"><span class="pl">${esc(it.label)}</span><b style="color:${f == null && it.text.includes("--") ? "var(--dim)" : f == null ? "var(--fg)" : c}">${esc(it.text)}</b>${bar}</span>`;
       }).join("");
       return `<div class="sysbar ${esc(a.align || "")}" style="${sz}">${pills}</div>`;
+    }
+    case "volumebar": {
+      const mx = s.max || 1, f = clamp01((s.level || 0) / mx), v = a.vertical && a.vertical !== "0";
+      return `<div class="vol${v ? " v" : ""}${foc}${s.muted ? " muted" : ""}" style="${sz}" data-id="${id}"><span class="lab">${esc(a.label || "")}</span><button class="btn" data-id="${id}" data-act="mute" title="mute">${icon(s.muted ? "mute" : "speaker")}</button><input type="range" min="0" max="${mx}" step="${(num(a.step, 0.05) * mx).toFixed(4)}" value="${s.level || 0}" data-id="${id}" data-range="1" style="--f:${(f * 100).toFixed(1)}%"><span class="val">${esc(s.text || "")}</span></div>`;
+    }
+    case "pacmanbar": {
+      const done = num(a.done), total = num(a.total), f = total > 0 ? clamp01(done / total) : 0, eta = num(a.eta, -1);
+      const hum = (v, rate) => { const U = ["B", "KiB", "MiB", "GiB", "TiB"]; let u = 0; while (v > 2048 && u < 4) { v /= 1024; u++; } return (rate ? v.toFixed(v < 10 ? 2 : v < 100 ? 1 : 0) : v.toFixed(1)) + " " + U[u]; };
+      const e = eta < 0 ? "--:--" : eta >= 3600 ? `${Math.floor(eta / 3600)}:${String(Math.floor(eta / 60) % 60).padStart(2, "0")}:${String(eta % 60).padStart(2, "0")}` : `${String(Math.floor(eta / 60)).padStart(2, "0")}:${String(eta % 60).padStart(2, "0")}`;
+      return `<div class="pac" style="${sz}"><span class="nm">${esc(a.name || "")}</span><span class="inf">${hum(done)} · ${hum(num(a.rate), true)}/s · ${e}</span><div class="trk" style="--f:${(f * 100).toFixed(1)}%"><i class="eat" data-sp="w:${(f * 100).toFixed(2)}"></i><u class="mouth" style="left:${(f * 100).toFixed(2)}%"></u></div><span class="pc">${Math.floor(f * 100)}%</span></div>`;
+    }
+    case "corebars": {
+      const infos = csv(a.infos), first = Math.max(0, num(a.first));
+      return `<div class="cores" style="${sz}">${series.slice(first).map((v, k) => { const i = first + k, lv = level(clamp01(v / 100)); return `<div class="cr"><span class="l">${esc(labels[i] ?? "c" + i)}</span><b style="color:${lv}">${v.toFixed(1)}%</b><span class="i">${esc(infos[i] || "")}</span><div class="trk"><i data-sp="w:${clamp01(v / 100) * 100}" style="--c:${lv}"></i></div></div>`; }).join("")}</div>`;
+    }
+    case "ratepanel": {
+      const peaks = csv(a.peaks).map(Number), top = Math.max(1, ...series, ...peaks.filter(Number.isFinite));
+      const hum = (v) => { const U = ["B", "KiB", "MiB", "GiB", "TiB"]; let u = 0; while (v > 2048 && u < 4) { v /= 1024; u++; } return v.toFixed(v < 10 ? 2 : v < 100 ? 1 : 0) + U[u] + "/s"; };
+      return `<div class="cores rates" style="${sz}">${series.map((v, i) => `<div class="cr"><span class="l">${esc(labels[i] ?? "")}</span><b>${hum(v)}</b><span class="i">${peaks[i] > 0 ? "pk " + hum(peaks[i]) : ""}</span><div class="trk"><i data-sp="w:${(v / top * 100).toFixed(2)}" style="--c:var(--accent)"></i></div></div>`).join("")}</div>`;
     }
     case "tagcloud": {
       const ws = csv(a.words), wt = csv(a.weights).map(Number), fin = wt.filter(Number.isFinite), mn = Math.min(...fin), mx = Math.max(...fin);
@@ -595,6 +616,7 @@ export async function mountSkin(root, o = {}) {
   root.addEventListener("input", (e) => {
     const t = e.target;
     if (t.tagName === "INPUT" && t.dataset.act === "text") { act(t.dataset.id, "text", t.value); pump(); }
+    else if (t.tagName === "INPUT" && t.dataset.range) { act(t.dataset.id, "set", t.value); pump(); }
   });
   root.addEventListener("change", (e) => {
     const t = e.target;
