@@ -176,7 +176,7 @@ fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::compon
             return Err(format!("{n}: expected an element kind first, got `{kind_s}`"));
         }
         let kind = Kind::parse(kind_s).ok_or_else(|| {
-            let known = ["scroll", "custom", "stack", "colorpicker", "datepicker", "timepicker", "filepicker", "gradientpicker", "sequencer", "nodeeditor", "pixeleditor"];
+            let known = ["scroll", "custom", "stack", "filepicker", "sequencer", "nodeeditor", "pixeleditor"];
             if known.contains(&kind_s.as_str()) {
                 format!("{n}: `{kind_s}` exists in lazytui (C) but not in lazyui yet")
             } else {

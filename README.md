@@ -221,3 +221,14 @@ PgUp/PgDn, Home/End, `m` mutes, click/drag/wheel on the bar, click the percent t
 `-Sy` line with the same arithmetic (the mouth chomps as the hash advances; a chomping Pac-Man eats the dots on the web).
 `heatdither` is the heat grid as ordered-dither braille. `corebars labels values infos` and `ratepanel labels values peaks` are
 monitor rows with a load bar (green/yellow/red by percent).
+
+### colorpicker, timepicker, datepicker, gradientpicker
+
+The pickers (`src/pickers.rs`) keep their own state, read `value=` once (or `bind=KEY` whenever the model changes it) and write
+their text value back to `bind`: `#rrggbb`, `HH:MM[:SS]`, `YYYY-MM-DD`, `0:#000000,1:#ffffff`; each emits `change` with that
+text. `colorpicker`: arrows move saturation/value, `[` `]` the hue, `r` resets, the mouse drags the plane and hue bar.
+`timepicker seconds=1 look=fields|spinbox|h12`: left/right pick a field, up/down or the wheel change it. `datepicker`: arrows move
+days/weeks, PgUp/PgDn months, `[` `]` years, click a day or the `‹ ›` arrows (own calendar maths, any year). `gradientpicker`:
+tab picks a stop, left/right move it, click adds one (coloured by the gradient there), drag moves, del removes, `r` resets;
+`act color #hex` recolours the selected stop, so a colorpicker can feed it. The browser draws the same state as a CSS gradient
+plane, spinner buttons, a month grid and draggable stop dots.

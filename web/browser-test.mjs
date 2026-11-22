@@ -139,6 +139,23 @@ try {
     const t1 = await run("document.querySelector('.scr').textContent"); await sleep(400);
     assert.notEqual(await run("document.querySelector('.scr').textContent"), t1, "scramble changes with time");
   });
+  await check("the audio and picker pages: slider, mute, plane drag, day click, stop add", async () => {
+    await click(".seg button:nth-of-type(6)"); await sleep(700);
+    assert.ok((await q(".vol")) === 2 && (await q(".pac .mouth")) === 1 && (await q(".cores .cr")) >= 6);
+    await run(`document.querySelector('.vol button[data-act=mute]').click()`); await sleep(300);
+    assert.ok((await q(".vol.muted")) === 1, "mute toggles");
+    await click(".seg button:nth-of-type(7)"); await sleep(700);
+    assert.ok((await q(".cp .cpp")) === 1 && (await q(".dp .day")) === 30 && (await q(".tp .tf")) === 3 && (await q(".gp .gpm i")) === 3);
+    const hex0 = await run("document.querySelector('.cpf code').textContent");
+    await run(`(()=>{const m=document.querySelector('.cpp'),b=m.getBoundingClientRect(),o={bubbles:true,button:0,clientX:b.left+b.width*.2,clientY:b.top+b.height*.8};m.dispatchEvent(new PointerEvent('pointerdown',o));dispatchEvent(new PointerEvent('pointerup',o))})()`); await sleep(300);
+    assert.notEqual(await run("document.querySelector('.cpf code').textContent"), hex0, "dragging the plane changes the colour");
+    await run(`document.querySelector('.day[data-arg="9"]').click()`); await sleep(300);
+    assert.ok((await run("document.querySelector('.day.on').textContent")) === "9", "a day click selects it");
+    await run(`document.querySelector('.tf .btn[data-act=inc]').click()`); await sleep(300);
+    assert.equal(await run("document.querySelector('.tf b').textContent"), "22", "hours step up");
+    await run(`(()=>{const m=document.querySelector('.gpb'),b=m.getBoundingClientRect(),o={bubbles:true,button:0,clientX:b.left+b.width*.25,clientY:b.top+5};m.dispatchEvent(new PointerEvent('pointerdown',o));dispatchEvent(new PointerEvent('pointerup',o))})()`); await sleep(300);
+    assert.equal(await q(".gp .gpm i"), 4, "a click on the bar adds a stop");
+  });
 } finally {
   proc.kill(); srv.close();
 }

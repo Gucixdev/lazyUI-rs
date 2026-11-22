@@ -3,6 +3,7 @@ pub mod canvas;
 pub mod bars;
 pub mod charts;
 pub mod fancy;
+pub mod pickers;
 pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;

@@ -66,7 +66,7 @@ function styleOnce() {
 
 // ---- tree -> HTML -------------------------------------------------------------------------------------------------
 
-const ONE_ROW = new Set(["volumebar", "pacmanbar", "scramble", "text", "progressbar", "searchbar", "buttonbar", "keybar", "gauge", "ringbar", "spinner", "clock", "timer", "dropdown", "segbar"]);
+const ONE_ROW = new Set(["timepicker", "volumebar", "pacmanbar", "scramble", "text", "progressbar", "searchbar", "buttonbar", "keybar", "gauge", "ringbar", "spinner", "clock", "timer", "dropdown", "segbar"]);
 const CELL_H = 22;
 
 // does this subtree want the leftover space? (a list does, a row of one-line widgets does not)
@@ -255,6 +255,27 @@ function renderCustom(n, dir, sz, st) {
       const peaks = csv(a.peaks).map(Number), top = Math.max(1, ...series, ...peaks.filter(Number.isFinite));
       const hum = (v) => { const U = ["B", "KiB", "MiB", "GiB", "TiB"]; let u = 0; while (v > 2048 && u < 4) { v /= 1024; u++; } return v.toFixed(v < 10 ? 2 : v < 100 ? 1 : 0) + U[u] + "/s"; };
       return `<div class="cores rates" style="${sz}">${series.map((v, i) => `<div class="cr"><span class="l">${esc(labels[i] ?? "")}</span><b>${hum(v)}</b><span class="i">${peaks[i] > 0 ? "pk " + hum(peaks[i]) : ""}</span><div class="trk"><i data-sp="w:${(v / top * 100).toFixed(2)}" style="--c:var(--accent)"></i></div></div>`).join("")}</div>`;
+    }
+    case "colorpicker": {
+      const h = s.h || 0, sat = s.s || 0, val = s.v || 0, hx = s.hex || "#000000";
+      const n = parseInt(hx.slice(1), 16);
+      return `<div class="cp${foc}" style="${sz}" data-id="${id}"><div class="cpp" data-id="${id}" style="--h:${h}"><i class="dot" style="left:${(sat * 100).toFixed(2)}%;top:${((1 - val) * 100).toFixed(2)}%;background:${hx}"></i></div><div class="cph" data-id="${id}"><i style="top:${(h / 360 * 100).toFixed(2)}%"></i></div><div class="cpf"><span class="sw" style="background:${hx}"></span><code>${hx}</code><span class="rgb">r ${n >> 16} · g ${(n >> 8) & 255} · b ${n & 255}</span></div></div>`;
+    }
+    case "timepicker": {
+      const h12 = !!s.h12, secs = !!s.seconds, vals = [s.h, s.m, s.s].slice(0, secs ? 3 : 2), look = a.look || "fields";
+      const shown = vals.map((v, i) => String(i === 0 && h12 ? (v % 12 || 12) : v).padStart(2, "0"));
+      const cell = (v, i) => `<span class="tf"><button class="btn" data-id="${id}" data-act="inc" data-arg="${i}" title="up">${icon("up")}</button><b>${v}</b><button class="btn" data-id="${id}" data-act="dec" data-arg="${i}" title="down">${icon("down")}</button></span>`;
+      return `<div class="tp ${esc(look)}${foc}" style="${sz}" data-id="${id}">${shown.map((v, i) => cell(v, i)).join('<span class="sep">:</span>')}${h12 ? `<button class="btn ampm" data-id="${id}" data-act="inc" data-arg="${vals.length}">${s.h < 12 ? "AM" : "PM"}</button>` : ""}</div>`;
+    }
+    case "datepicker": {
+      const first = s.first || 0, days = s.days || 30, cells = [];
+      for (let i = 0; i < first; i++) cells.push('<span></span>');
+      for (let d = 1; d <= days; d++) cells.push(`<button class="day${d === s.d ? " on" : ""}" data-id="${id}" data-act="day" data-arg="${d}">${d}</button>`);
+      return `<div class="dp${foc}" style="${sz}" data-id="${id}"><div class="dph"><button class="btn" data-id="${id}" data-act="year" data-arg="-1" title="previous year">&laquo;</button><button class="btn" data-id="${id}" data-act="month" data-arg="-1" title="previous month">&lsaquo;</button><b>${esc(s.month || "")} ${s.y}</b><button class="btn" data-id="${id}" data-act="month" data-arg="1" title="next month">&rsaquo;</button></div><div class="dpg">${["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((n) => `<em>${n}</em>`).join("")}${cells.join("")}</div></div>`;
+    }
+    case "gradientpicker": {
+      const st = s.stops || [], css = st.map(([p, c]) => `${c} ${(p * 100).toFixed(2)}%`).join(",");
+      return `<div class="gp${foc}" style="${sz}" data-id="${id}"><div class="gpb" data-id="${id}" style="background:linear-gradient(to right,${css || "#000,#fff"})"></div><div class="gpm" data-id="${id}">${st.map(([p, c], i) => `<i class="${i === s.sel ? "on" : ""}" style="left:${(p * 100).toFixed(2)}%;--c:${c}" data-i="${i}"></i>`).join("")}</div><div class="gpl">stop ${(s.sel || 0) + 1}/${st.length} · pos ${((st[s.sel || 0] || [0])[0]).toFixed(2)} · ${esc((st[s.sel || 0] || [0, ""])[1])}</div></div>`;
     }
     case "tagcloud": {
       const ws = csv(a.words), wt = csv(a.weights).map(Number), fin = wt.filter(Number.isFinite), mn = Math.min(...fin), mx = Math.max(...fin);
@@ -492,6 +513,22 @@ export async function mountSkin(root, o = {}) {
     const p = mapPt(m, e);
     act(m.dataset.id, "zoom", `2,${p[0]},${p[1]}`); pump();
   });
+  // pickers: drag the colour plane / hue bar, drag or add stops on the gradient bar
+  let pickDrag = null;
+  const pick = (el, e) => {
+    const r = el.getBoundingClientRect(), fx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), fy = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    if (el.classList.contains("cpp")) act(el.dataset.id, "sv", `${fx},${1 - fy}`);
+    else if (el.classList.contains("cph")) act(el.dataset.id, "hue", String(fy * 360));
+    else if (el.classList.contains("gpb") || el.classList.contains("gpm")) {
+      const i = e.target.dataset && e.target.dataset.i;
+      if (e.type === "pointerdown") { if (i !== undefined) act(el.dataset.id, "select", i); else act(el.dataset.id, "add", String(fx)); }
+      else act(el.dataset.id, "move", String(fx));
+    }
+    pump();
+  };
+  root.addEventListener("pointerdown", (e) => { const el = e.target.closest ? e.target.closest(".cpp,.cph,.gpb,.gpm") : null; if (el && e.button === 0) { pickDrag = el; try { el.setPointerCapture(e.pointerId); } catch {} pick(el, e); } });
+  root.addEventListener("pointermove", (e) => { if (pickDrag) pick(pickDrag, e); });
+  addEventListener("pointerup", () => { pickDrag = null; });
   // a minimap: press or drag anywhere on it seeks to that line
   let mmDrag = null;
   const mmSeek = (m, e) => { const r = m.getBoundingClientRect(), n = +m.dataset.mm || 1; act(m.dataset.id, "seek", String(Math.floor(Math.max(0, Math.min(0.9999, (e.clientY - r.top) / r.height)) * n))); pump(); };
