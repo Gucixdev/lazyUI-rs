@@ -7,6 +7,10 @@ It is a mix of ideas: the Elm loop of iced, the retained keyed tree and headless
 and diff of ratatui, and the spec language, springs and fallbacks of lazytui. What was taken from each, and what was
 left out, is in [`references/`](references/) (one file per project) and [`DESIGN.md`](DESIGN.md).
 
+## Try it
+
+`./run` - one key picks the backend for the demo: terminal, window, browser (wasm) or a text snapshot.
+
 ## As a binary
 
 Describe the UI in a spec file (`examples/demo.lui`):

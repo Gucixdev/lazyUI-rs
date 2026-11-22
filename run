@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# The demo (examples/demo.lui) in the backend you pick: t = terminal, g = window, w = browser (wasm), s = snapshot text.
+# No arguments. Builds what it needs first. Needs: cargo; for w also the wasm32-unknown-unknown target and python3.
+set -euo pipefail
+cd "$(dirname "$0")"
+spec=examples/demo.lui
+
+printf 'lazyui demo:  [t]erminal  [g]ui window  [w]eb (wasm)  [s]napshot  [q]uit > ' >&2
+read -rn1 pick </dev/tty
+printf '\n' >&2
+
+case "$pick" in
+  t|"") cargo build --release -q && exec target/release/lazyui run "$spec" ;;
+  g)    cargo build --release -q && exec target/release/lazyui run "$spec" --gui ;;
+  s)    cargo build --release -q && exec target/release/lazyui snap "$spec" ;;
+  w)    ( sleep 2; command -v xdg-open >/dev/null && xdg-open http://localhost:8000 >/dev/null 2>&1 || true ) &
+        printf 'http://localhost:8000 (ctrl-c stops)\n' >&2
+        exec web/run ;;
+  *)    exit 0 ;;
+esac
