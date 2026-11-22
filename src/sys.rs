@@ -15,7 +15,8 @@ pub static DEFS: &[Def] = &[Def {
     doc: "vitals in one line: items=cpu,mem,swap,disk,net,ping,fps every=1 (seconds) disk=/ ping=host:port|off align=left|right; fills model keys sys.*",
     focus: false,
     rows: Some(1),
-    live: 1.0,
+    // a native bar samples every second; in the browser the page feeds the keys and the engine need not wake for it
+    live: if cfg!(target_arch = "wasm32") { 0.0 } else { 1.0 },
     make: || Box::new(Sysbar::default()),
 }];
 
