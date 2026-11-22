@@ -1,6 +1,7 @@
 pub mod anim;
 pub mod canvas;
 pub mod charts;
+pub mod fancy;
 pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;

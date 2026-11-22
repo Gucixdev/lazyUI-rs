@@ -212,4 +212,17 @@ export const CSS = `
 .lz .mmr i{flex:1;min-height:1px;background:var(--dim);opacity:.55;border-radius:1px}
 .lz .mmr i.mk{background:var(--warn);opacity:1}
 .lz .mmv{position:absolute;left:0;right:0;background:var(--sel);border-block:1px solid var(--accent);pointer-events:none}
+.lz .tags{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;justify-content:center;align-content:center;padding:10px;min-height:60px;flex:1}
+.lz .chart.web svg{width:100%;overflow:visible}.lz .chart.web .gr,.lz .radar .gr{fill:none;stroke:var(--line);stroke-width:.5}.lz .chart.web text{font-size:4.6px;fill:var(--dim)}
+.lz .pie svg.chart{width:auto;aspect-ratio:1;max-width:60%}.lz .pie .legend.col{display:flex;flex-direction:column;gap:6px}
+.lz .radar{display:grid;place-items:center;min-height:180px;flex:1}
+.lz .scope{position:relative;height:100%;aspect-ratio:1;max-width:100%;border-radius:50%;background:color-mix(in srgb,var(--col) 8%,var(--card));box-shadow:inset 0 0 0 1px var(--col)}
+.lz .scope svg{position:absolute;inset:0;width:100%;height:100%}.lz .scope .rim{fill:none;stroke:var(--col);stroke-width:.8}
+.lz .sweep{position:absolute;inset:3%;border-radius:50%;background:conic-gradient(from 0deg,transparent 0deg 285deg,color-mix(in srgb,var(--col) 55%,transparent) 359deg,var(--col) 360deg);animation:lz-spin linear infinite;pointer-events:none}
+.lz .blip{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:4px;animation:lz-blip linear infinite;opacity:.06;pointer-events:none}
+.lz .blip i{width:8px;height:8px;border-radius:50%;background:var(--col);box-shadow:0 0 8px var(--col)}.lz .blip em{font-style:normal;font-size:11px;color:var(--col)}
+.lz .scope b{position:absolute;font-size:11px;color:var(--dim);font-weight:600}.lz .scope .n{top:1%;left:50%;transform:translateX(-50%)}.lz .scope .s{bottom:1%;left:50%;transform:translateX(-50%)}.lz .scope .e{right:2%;top:50%;transform:translateY(-50%)}.lz .scope .w{left:2%;top:50%;transform:translateY(-50%)}
+@keyframes lz-spin{to{transform:rotate(360deg)}}@keyframes lz-blip{0%{opacity:1}100%{opacity:.06}}
+.lz .rain{position:relative;border-radius:var(--r2);overflow:hidden;background:#050a07;border:1px solid var(--line);min-height:80px;flex:1}.lz .rain canvas{position:absolute;inset:0;width:100%;height:100%}
+.lz .scr{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;letter-spacing:.04em;white-space:pre;overflow:hidden}.lz .scr b{font-weight:700}.lz .scr i{font-style:normal;color:var(--dim)}.lz .scr i.cur{color:var(--on);background:var(--accent)}
 `;

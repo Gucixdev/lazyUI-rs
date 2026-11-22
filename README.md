@@ -93,7 +93,7 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 
 Charts and the like need code, so they are Rust, registered by name (`lazyui widgets ls` lists them with their attributes).
 Data comes from `values="1,2,3"` or `bind=KEY` (a comma list in the model; `ui.push(key, sample, cap)` appends and
-keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table sysbar worldmap globe minimap`. They draw with
+keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table sysbar worldmap globe minimap radar rain scramble tagcloud webchart piechart`. They draw with
 block/braille glyphs on a Unicode terminal and with `# = . :` on an ASCII one, so a snapshot is the same everywhere.
 `ringbar` and `spinner` move with the Ui clock (`tick`), never the wall clock.
 
@@ -203,3 +203,12 @@ heat="PL:38,DE:83"` (or `heatbind=KEY lo hi ramp=c1,c2,c3`) `sun=DEG|auto`. `glo
 The terminal draws the pixels as half blocks (two pixels per cell, ASCII fallback is a background fill); the browser
 asks the engine for RGBA (`lz_pixels`, `Widget::pixels`) and puts it on a `<canvas>`, with the country names as DOM text
 on top so they stay sharp.
+
+### radar, rain, scramble, tagcloud, webchart, piechart
+
+The fancy ones from lazytui, all pure functions of attributes and the Ui clock (`src/fancy.rs`). `radar blips="bearing:range:label;..."
+speed=deg/s` sweeps and lights blips that fade over a rotation; `rain seed speed` is matrix rain; `scramble text progress=0..1|auto`
+resolves text out of random glyphs; `tagcloud words weights`; `webchart values labels max rings`; `piechart values labels colors
+donut=1 legend=0`. In the terminal round shapes are braille wires and half-block fills; in the browser they are SVG/CSS (radar
+sweep and blip fade are CSS animations with delays computed from the bearing) and, for the two that never rest, `web/fancy.js`
+runs one frame loop that sleeps when no rain or scramble is on the page.

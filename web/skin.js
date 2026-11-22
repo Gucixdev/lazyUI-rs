@@ -11,6 +11,7 @@
 // spring (spring.js): bars, counters, charts, the sliding highlight, panel entrances, hover tilt.
 
 import { engine } from "./lazyui.js";
+import { ambient } from "./fancy.js";
 import { Motion } from "./spring.js";
 import { LOOKS, CSS } from "./looks.js";
 
@@ -63,7 +64,7 @@ function styleOnce() {
 
 // ---- tree -> HTML -------------------------------------------------------------------------------------------------
 
-const ONE_ROW = new Set(["text", "progressbar", "searchbar", "buttonbar", "keybar", "gauge", "ringbar", "spinner", "clock", "timer", "dropdown", "segbar"]);
+const ONE_ROW = new Set(["scramble", "text", "progressbar", "searchbar", "buttonbar", "keybar", "gauge", "ringbar", "spinner", "clock", "timer", "dropdown", "segbar"]);
 const CELL_H = 22;
 
 // does this subtree want the leftover space? (a list does, a row of one-line widgets does not)
@@ -72,7 +73,7 @@ function flexy(n) {
   if (sz != null && sz !== "") return !/^\d+$/.test(sz);
   if (n.kind === "spacer") return true;
   if (n.kids && n.kids.length) return n.kids.some(flexy);
-  return ["list", "tree", "table", "worldmap", "globe", "minimap"].includes(n.kind);
+  return ["list", "tree", "table", "worldmap", "globe", "minimap", "rain"].includes(n.kind);
 }
 
 function sizeStyle(n, dir) {
@@ -234,10 +235,41 @@ function renderCustom(n, dir, sz, st) {
       }).join("");
       return `<div class="sysbar ${esc(a.align || "")}" style="${sz}">${pills}</div>`;
     }
+    case "tagcloud": {
+      const ws = csv(a.words), wt = csv(a.weights).map(Number), fin = wt.filter(Number.isFinite), mn = Math.min(...fin), mx = Math.max(...fin);
+      const f = (i) => (Number.isFinite(wt[i]) && mx > mn ? (wt[i] - mn) / (mx - mn) : 0.5);
+      return `<div class="tags" style="${sz}">${ws.map((w, i) => `<span style="font-size:${(12 + f(i) * 20).toFixed(1)}px;opacity:${(0.45 + f(i) * 0.55).toFixed(2)};color:${f(i) > 0.66 ? "var(--accent)" : f(i) > 0.33 ? "var(--fg)" : "var(--dim)"};font-weight:${f(i) > 0.66 ? 700 : 500}">${esc(w)}</span>`).join(" ")}</div>`;
+    }
+    case "webchart": {
+      const nn = series.length, max = a.max != null ? num(a.max) : Math.max(...series, 0), rings = Math.max(1, Math.min(12, num(a.rings, 4)));
+      if (nn < 3 || !(max > 0)) return `<div class="chart" style="${sz}"></div>`;
+      const ang = (i) => -Math.PI / 2 + 2 * Math.PI * i / nn, pt = (i, f) => [50 + Math.cos(ang(i)) * 34 * f, 50 + Math.sin(ang(i)) * 34 * f];
+      const poly = (f) => series.map((_, i) => pt(i, f).map((v) => v.toFixed(2)).join(",")).join(" ");
+      const data = series.map((v, i) => pt(i, clamp01(v / max)).map((x) => x.toFixed(2)).join(",")).join(" ");
+      const lab = series.map((_, i) => { const [x, y] = pt(i, 1.2), c = Math.cos(ang(i)); return `<text x="${x.toFixed(2)}" y="${(y + 1.5).toFixed(2)}" text-anchor="${c > 0.3 ? "start" : c < -0.3 ? "end" : "middle"}">${esc(labels[i] ?? "")}</text>`; }).join("");
+      const grid = Array.from({ length: rings }, (_, k) => `<polygon points="${poly((k + 1) / rings)}" class="gr"/>`).join("") + series.map((_, i) => { const [x, y] = pt(i, 1); return `<line x1="50" y1="50" x2="${x.toFixed(2)}" y2="${y.toFixed(2)}" class="gr"/>`; }).join("");
+      return `<div class="chart web" style="${sz};height:${Math.max(H, 180)}px"><svg viewBox="0 0 100 100" style="height:100%">${grid}<polygon points="${data}" fill="${col}" fill-opacity=".28" stroke="${col}" stroke-width="1.4" stroke-linejoin="round"/>${series.map((v, i) => `<circle cx="${pt(i, clamp01(v / max))[0].toFixed(2)}" cy="${pt(i, clamp01(v / max))[1].toFixed(2)}" r="1.5" fill="${col}"/>`).join("")}${lab}</svg></div>`;
+    }
+    case "piechart": {
+      const tot = series.reduce((p, v) => p + Math.max(0, v), 0) || 1, donut = a.donut && a.donut !== "0", r = donut ? 15.9 : 8, sw = donut ? 6 : 16;
+      let acc = 0;
+      const arcs = series.map((v, i) => { const f = Math.max(0, v) / tot; const d = `<circle cx="20" cy="20" r="${r}" fill="none" stroke="${seriesColor(i)}" stroke-width="${sw}" stroke-dasharray="${(f * 100).toFixed(2)} ${(100 - f * 100).toFixed(2)}" stroke-dashoffset="${(-acc * 100).toFixed(2)}" transform="rotate(-90 20 20)" pathLength="100"/>`; acc += f; return d; }).join("");
+      const legend = a.legend !== "0" ? `<div class="legend col">${series.map((v, i) => `<span><i style="background:${seriesColor(i)}"></i>${esc(labels[i] ?? i + 1)} ${(Math.max(0, v) / tot * 100).toFixed(0)}%</span>`).join("")}</div>` : "";
+      return `<div class="row pie" style="${sz};gap:16px;align-items:center"><svg class="chart" viewBox="0 0 40 40" style="height:${Math.max(H, 120)}px;flex:none">${arcs}</svg>${legend}</div>`;
+    }
+    case "radar": {
+      const speed = Math.max(1, num(a.speed, 90)), T = 360 / speed;
+      const blips = (a.blips || "").split(";").map((b) => b.split(":")).filter((b) => b.length >= 2 && Number.isFinite(+b[0]) && Number.isFinite(+b[1])).map(([b, r, ...l]) => ({ b: ((+b % 360) + 360) % 360, r: clamp01(+r) * 0.97, l: l.join(":") }));
+      const dots = blips.map((p) => { const ang = p.b * Math.PI / 180, x = 50 + Math.sin(ang) * 46 * p.r, y = 50 - Math.cos(ang) * 46 * p.r; return `<span class="blip" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%;animation-duration:${T.toFixed(2)}s;animation-delay:${(p.b / speed - T).toFixed(2)}s"><i></i>${p.l ? `<em>${esc(p.l)}</em>` : ""}</span>`; }).join("");
+      const rings = [1, 2].map((k) => `<circle cx="50" cy="50" r="${(46 * k / 3).toFixed(2)}" class="gr"/>`).join("") + Array.from({ length: 12 }, (_, i) => { const t = i * 30 * Math.PI / 180; return `<line x1="50" y1="50" x2="${(50 + Math.sin(t) * 46).toFixed(2)}" y2="${(50 - Math.cos(t) * 46).toFixed(2)}" class="gr"/>`; }).join("");
+      return `<div class="radar" style="${sz};height:${Math.max(H, 220)}px;--col:${a.color ? tone(a.color) : "var(--ok)"}"><div class="scope"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" class="rim"/>${rings}</svg><div class="sweep" style="animation-duration:${T.toFixed(2)}s"></div>${dots}<b class="n">N</b><b class="e">E</b><b class="s">S</b><b class="w">W</b></div></div>`;
+    }
+    case "rain": return `<div class="rain" style="${sz};height:${Math.max(H, 120)}px" data-keep="1"><canvas data-seed="${esc(a.seed || 1)}" data-speed="${esc(a.speed || 1)}"></canvas></div>`;
+    case "scramble": return `<div class="scr" style="${sz}" data-text="${esc(a.text || (a.bind != null ? s.text : "") || "")}" data-progress="${esc(a.progress ?? "1")}" data-keep="1"></div>`;
     case "worldmap":
     case "globe":
       // the picture is a canvas the skin fills from the engine (maps()); the engine's view state rides along as data-st
-      return `<div class="map${foc}" style="${sz}" data-id="${id}" data-map="${n.kind}" data-labels="${a.labels ? 1 : ""}" data-lang="${esc(a.lang || "")}" data-st="${esc(JSON.stringify(s))}"><canvas></canvas><div class="lbls"></div><div class="mapcap"></div></div>`;
+      return `<div class="map${foc}" style="${sz}" data-id="${id}" data-map="${n.kind}" data-keep="1" data-labels="${a.labels ? 1 : ""}" data-lang="${esc(a.lang || "")}" data-st="${esc(JSON.stringify(s))}"><canvas></canvas><div class="lbls"></div><div class="mapcap"></div></div>`;
     case "minimap": {
       const d = s.series || [], rows = Math.min(d.length, 96), per = d.length / (rows || 1);
       const bars = Array.from({ length: rows }, (_, i) => {
@@ -262,7 +294,7 @@ function morph(from, to) {
   // a different page / block (data-blk) is a different thing: replace it, so its parts enter fresh
   if (from.nodeType === 1 && from.getAttribute("data-blk") !== to.getAttribute("data-blk")) { from.replaceWith(to.cloneNode(true)); return; }
   if (from.nodeType === 3) { if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue; return; }
-  if (from.nodeType === 1 && from.hasAttribute("data-map")) { // the map's insides belong to maps(); only its attributes follow
+  if (from.nodeType === 1 && from.hasAttribute("data-keep")) { // the map's insides belong to maps(); only its attributes follow
     for (const { name, value } of [...to.attributes]) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
     return;
   }
@@ -401,6 +433,7 @@ export async function mountSkin(root, o = {}) {
   }
 
   // drag pans the map or turns the globe, the wheel zooms, a click that did not move picks a country: all in canvas pixels
+  const amb = ambient(root);
   let mapDrag = null, utcT = 0;
   const mapPt = (m, e) => { const cv = m.querySelector("canvas"), r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * cv.width, (e.clientY - r.top) / r.height * cv.height]; };
   root.addEventListener("pointerdown", (e) => {
@@ -469,6 +502,7 @@ export async function mountSkin(root, o = {}) {
     springs();
     track();
     maps();
+    amb.wake();
     if (root.querySelector(".map") && !utcT) { utcT = setInterval(() => feed({ utc: Date.now() / 1000 }), 30000); feed({ utc: Date.now() / 1000 }); }
     if (root.querySelector(".sysbar")) startFeed();
   }
@@ -607,6 +641,6 @@ export async function mountSkin(root, o = {}) {
     accent(c) { root.style.setProperty("--accent", c); },
     feed,
     describe() { return JSON.parse(read(x.lz_describe())); },
-    destroy() { dead = true; clearTimeout(timer); cancelAnimationFrame(raf); clearInterval(clockTimer); clearInterval(utcT); feedStop(); if (MOTION === motion) MOTION = null; },
+    destroy() { dead = true; clearTimeout(timer); cancelAnimationFrame(raf); clearInterval(clockTimer); clearInterval(utcT); amb.stop(); feedStop(); if (MOTION === motion) MOTION = null; },
   };
 }

@@ -179,7 +179,7 @@ pub struct Def {
     pub make: fn() -> Box<dyn Widget>,
 }
 
-const TABLES: [&[Def]; 5] = [crate::charts::DEFS, crate::lists::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS];
+const TABLES: [&[Def]; 6] = [crate::charts::DEFS, crate::lists::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS, crate::fancy::DEFS];
 
 pub fn find(name: &str) -> Option<&'static Def> {
     all().find(|d| d.name == name)

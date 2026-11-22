@@ -129,6 +129,16 @@ try {
     const ev = await run(`(async()=>{window.__s=[];lazyui.on('seek',e=>__s.push(e.value));const m=document.querySelector('.mm'),b=m.getBoundingClientRect();m.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,clientX:b.left+5,clientY:b.top+b.height*.5}));dispatchEvent(new PointerEvent('pointerup'));await new Promise(r=>setTimeout(r,200));return __s.length})()`);
     assert.ok(ev >= 1, "seek event");
   });
+  await check("the fancy page: radar sweeps, rain falls, text resolves, charts draw", async () => {
+    await click(".seg button:nth-of-type(5)"); await sleep(900);
+    assert.equal(await q(".radar .blip"), 4, "four blips");
+    assert.ok((await q(".radar .sweep")) === 1 && (await q(".tags span")) === 9 && (await q(".web polygon")) >= 5 && (await q(".pie circle")) === 4);
+    const shot = `(()=>{const c=document.querySelector('.rain canvas');return c.toDataURL().length+':'+c.toDataURL().slice(-60)})()`;
+    const a = await run(shot); await sleep(500);
+    assert.notEqual(await run(shot), a, "the rain moved");
+    const t1 = await run("document.querySelector('.scr').textContent"); await sleep(400);
+    assert.notEqual(await run("document.querySelector('.scr').textContent"), t1, "scramble changes with time");
+  });
 } finally {
   proc.kill(); srv.close();
 }
