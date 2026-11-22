@@ -1177,6 +1177,20 @@ impl Ui {
         done
     }
 
+    /// A widget's picture in real pixels (a map for the web skin): RGBA bytes and a JSON side channel. Call after `render`.
+    pub fn pixels(&mut self, id: &str, w: i32, h: i32) -> Option<(Vec<u8>, String)> {
+        let p = self.placed.iter().find(|p| p.id == id)?.clone();
+        let el = Ui::el_at(&self.root, &p.path)?;
+        let focused = self.focus.as_deref() == Some(id);
+        match self.states.get_mut(id) {
+            Some(WState::Custom(wd)) => {
+                let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, focused, unicode: true, time: self.clock };
+                wd.pixels(&cx, w, h)
+            }
+            _ => None,
+        }
+    }
+
     /// The element tree as JSON: what an agent or a test reads instead of looking at pixels.
     pub fn tree_json(&self) -> String {
         fn node(ui: &Ui, i: usize, out: &mut String) {

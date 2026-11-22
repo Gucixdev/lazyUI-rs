@@ -123,6 +123,13 @@ impl Web {
         self.ui.describe_json()
     }
 
+    /// A widget's picture in real pixels (a map): RGBA bytes and its JSON side channel. Needs a `describe` first, which
+    /// is what creates the widget's state.
+    pub fn pixels(&mut self, id: &str, w: i32, h: i32) -> Option<(Vec<u8>, String)> {
+        self.sync();
+        self.ui.pixels(id, w, h)
+    }
+
     pub fn act(&mut self, id: &str, action: &str, arg: &str) -> bool {
         self.sync();
         self.ui.act(id, action, arg)

@@ -110,6 +110,25 @@ try {
     await run("document.querySelector('.lz').dispatchEvent(new PointerEvent('pointerleave'))"); await sleep(1800);
     assert.equal(await run("document.querySelector('.panel').style.transform"), "", "back at rest");
   });
+  await check("the world page paints a map on a canvas with names and a night side", async () => {
+    await click(".seg button:nth-of-type(4)"); await sleep(900);
+    assert.equal(await q(".map canvas"), 2, "atlas + globe");
+    const lit = await run(`(()=>{const c=document.querySelector('.map canvas'),d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let n=0;for(let i=0;i<d.length;i+=4)if(d[i]+d[i+1]+d[i+2]>60)n++;return n/(d.length/4)})()`);
+    assert.ok(lit > 0.15, "the canvas has a picture, lit share " + lit);
+    assert.ok((await q(".lbls span")) > 10, "country names");
+  });
+  await check("wheel zooms the map, a click picks a country, the picture follows", async () => {
+    const snap = `(()=>{const c=document.querySelector('.map canvas');return c.toDataURL().length+':'+c.toDataURL().slice(-80)})()`;
+    const before = await run(snap);
+    await run(`(()=>{const m=document.querySelector('.map'),b=m.getBoundingClientRect();m.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-120,clientX:b.left+b.width*.55,clientY:b.top+b.height*.4}))})()`); await sleep(400);
+    assert.notEqual(await run(snap), before, "zoomed picture differs");
+    await run(`(()=>{const m=document.querySelector('.map'),b=m.getBoundingClientRect(),o={bubbles:true,button:0,clientX:b.left+b.width*.5,clientY:b.top+b.height*.45};m.querySelector('canvas').dispatchEvent(new PointerEvent('pointerdown',o));dispatchEvent(new PointerEvent('pointerup',o))})()`); await sleep(400);
+    assert.ok((await q(".mapcap.on")) >= 1, "a country caption shows");
+  });
+  await check("a minimap drag seeks", async () => {
+    const ev = await run(`(async()=>{window.__s=[];lazyui.on('seek',e=>__s.push(e.value));const m=document.querySelector('.mm'),b=m.getBoundingClientRect();m.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,clientX:b.left+5,clientY:b.top+b.height*.5}));dispatchEvent(new PointerEvent('pointerup'));await new Promise(r=>setTimeout(r,200));return __s.length})()`);
+    assert.ok(ev >= 1, "seek event");
+  });
 } finally {
   proc.kill(); srv.close();
 }

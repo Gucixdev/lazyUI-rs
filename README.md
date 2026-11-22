@@ -93,7 +93,7 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 
 Charts and the like need code, so they are Rust, registered by name (`lazyui widgets ls` lists them with their attributes).
 Data comes from `values="1,2,3"` or `bind=KEY` (a comma list in the model; `ui.push(key, sample, cap)` appends and
-keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table sysbar`. They draw with
+keeps the newest `cap`). Done: `graph linechart barchart histogram heatgrid zonebar piebar segbar gauge ringbar spinner clock timer tree dropdown table sysbar worldmap globe minimap`. They draw with
 block/braille glyphs on a Unicode terminal and with `# = . :` on an ASCII one, so a snapshot is the same everywhere.
 `ringbar` and `spinner` move with the Ui clock (`tick`), never the wall clock.
 
@@ -188,3 +188,18 @@ the same keys can be read by the program or fed from outside. Natively it sample
 pings with a TCP connect on a background thread (`ping=off` to disable); `fps` is frames drawn per second. In the browser
 there is no `/proc`: the skin measures fps (animation frames) and the round trip to the page's origin, and anything else
 comes from `ui.feed({cpu: 12, mem: 40})`.
+
+### worldmap, globe, minimap
+
+Ported from lazytui. The planet is shaded per pixel in `world.rs` (a 0.5 degree raster of 177 countries, generated from
+lazytui's `worlddata.h` by `tools/gen_world` into `worlddata.rs`, do not edit): soft coasts, climate / political / heat /
+grey colouring, borders, graticule, the night side from the sun's position, and on the globe sun, specular, rim and
+atmosphere glow. `worldmap`: wheel or `+ -` zoom (to 64x), drag pans, click picks a country (`bind=KEY` gets its ISO
+code, event `pick`), `0` resets; `mode=climate|political|grey borders=0 night=1 grid=1 labels=1 lang=pl|en select=ISO
+heat="PL:38,DE:83"` (or `heatbind=KEY lo hi ramp=c1,c2,c3`) `sun=DEG|auto`. `globe` turns with arrows or drag, tilt up to
+85 degrees, same attributes. `sun=auto` reads `sys.utc` (seconds; the browser skin feeds it, natively the clock is used).
+`minimap` is a page as a density strip with the viewport marked: `values offset page marks seek=KEY`, click or drag seeks.
+
+The terminal draws the pixels as half blocks (two pixels per cell, ASCII fallback is a background fill); the browser
+asks the engine for RGBA (`lz_pixels`, `Widget::pixels`) and puts it on a `<canvas>`, with the country names as DOM text
+on top so they stay sharp.

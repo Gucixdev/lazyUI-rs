@@ -198,4 +198,18 @@ export const CSS = `
 .lz[data-look=classic] th{background:#c0c0c0;box-shadow:var(--bevel);border:0}
 .lz[data-look=classic] .clock,.lz[data-look=classic] .timer .t{font-weight:400}
 .lz[data-look=classic] .pill{box-shadow:var(--bevel);border:0}
+
+.lz .map{position:relative;min-height:180px;border-radius:var(--r2);overflow:hidden;background:#07101c;border:1px solid var(--line);flex:1}
+.lz .map.focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--sel)}
+.lz .map canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab;image-rendering:auto}
+.lz .map.grab canvas{cursor:grabbing}
+.lz .lbls{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.lz .lbls span{position:absolute;transform:translate(-50%,0);font-size:11px;line-height:14px;color:#f4f6ee;white-space:nowrap;text-shadow:0 0 3px #000,0 0 5px #000,0 1px 2px #000}
+.lz .mapcap{position:absolute;left:10px;bottom:10px;display:none;flex-direction:column;gap:1px;padding:8px 12px;border-radius:var(--r2);background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(var(--blur));backdrop-filter:blur(var(--blur));font-size:12px;color:var(--fg);pointer-events:none}
+.lz .mapcap.on{display:flex}.lz .mapcap b{font-size:13px}.lz .mapcap span{color:var(--dim)}
+.lz .mm{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;min-height:60px;flex:1;cursor:pointer;touch-action:none}
+.lz .mmr{position:absolute;inset:3px 3px 3px 3px;display:flex;flex-direction:column;gap:1px}
+.lz .mmr i{flex:1;min-height:1px;background:var(--dim);opacity:.55;border-radius:1px}
+.lz .mmr i.mk{background:var(--warn);opacity:1}
+.lz .mmv{position:absolute;left:0;right:0;background:var(--sel);border-block:1px solid var(--accent);pointer-events:none}
 `;

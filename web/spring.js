@@ -6,7 +6,7 @@
 //   m.to(el, "w", 42);              // width in %, from wherever it is now
 //   m.to(el, "ty", 0, { from: 14, preset: "bouncy" });
 //
-// Props: w h (%), l t pw ph (px: left top width height), tx ty (px), s (scale), rx ry (deg), o (opacity), fg (flex-grow).
+// Props: w h tp (%: width height top), l t pw ph (px: left top width height), tx ty (px), s (scale), rx ry (deg), o (opacity), fg (flex-grow).
 // `cnt` counts a number into el.textContent (data-suf is appended). `pts` springs a list of 0..1 values and calls
 // el._draw(values) every frame (line charts).
 
@@ -111,6 +111,7 @@ export class Motion {
         case "fg": st.flexGrow = v; break;
         case "l": st.left = v + "px"; break;
         case "t": st.top = v + "px"; break;
+        case "tp": st.top = v + "%"; break;
         case "pw": st.width = Math.max(0, v) + "px"; break;
         case "ph": st.height = Math.max(0, v) + "px"; break;
         case "o": st.opacity = Math.max(0, Math.min(1, v)); break;

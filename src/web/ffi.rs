@@ -7,6 +7,8 @@ use std::cell::RefCell;
 thread_local! {
     static APP: RefCell<Option<Web>> = const { RefCell::new(None) };
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static PIX: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static AUX: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static WIDGETS: RefCell<crate::components::Widgets> = RefCell::new(crate::components::Widgets::builtin());
     static ERR: RefCell<String> = const { RefCell::new(String::new()) };
 }
@@ -164,6 +166,37 @@ pub extern "C" fn lz_describe() -> usize {
         *o.borrow_mut() = d.into_bytes();
         o.borrow().len()
     })
+}
+
+/// A widget's picture (a map) for a canvas of w x h pixels: returns the RGBA byte count (0 = no such picture); read the
+/// bytes at `lz_pix_ptr` and the JSON side channel (labels) at `lz_aux_ptr`/`lz_aux_len`.
+///
+/// # Safety
+/// `ip`/`inn` is a readable element id.
+#[no_mangle]
+pub unsafe extern "C" fn lz_pixels(ip: *const u8, inn: usize, w: i32, h: i32) -> usize {
+    let r = with(|a| a.pixels(s(ip, inn), w, h), None);
+    let (bytes, aux) = r.unwrap_or_default();
+    AUX.with(|a| *a.borrow_mut() = aux.into_bytes());
+    PIX.with(|p| {
+        *p.borrow_mut() = bytes;
+        p.borrow().len()
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn lz_pix_ptr() -> *const u8 {
+    PIX.with(|p| p.borrow().as_ptr())
+}
+
+#[no_mangle]
+pub extern "C" fn lz_aux_ptr() -> *const u8 {
+    AUX.with(|p| p.borrow().as_ptr())
+}
+
+#[no_mangle]
+pub extern "C" fn lz_aux_len() -> usize {
+    AUX.with(|p| p.borrow().len())
 }
 
 /// A semantic action on an element: focus, select, activate, toggle, text, sort, reset.

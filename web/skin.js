@@ -39,6 +39,7 @@ const ICON = {
   terminal: "M4 5h16v14H4zM7 9l3 3-3 3M12 15h5",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
   keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
+  globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18",
 };
 const icon = (n, cls = "") => (ICON[n] ? `<svg class="ic ${cls}" viewBox="0 0 24 24"><path d="${ICON[n]}"/></svg>` : "");
 
@@ -71,7 +72,7 @@ function flexy(n) {
   if (sz != null && sz !== "") return !/^\d+$/.test(sz);
   if (n.kind === "spacer") return true;
   if (n.kids && n.kids.length) return n.kids.some(flexy);
-  return ["list", "tree", "table"].includes(n.kind);
+  return ["list", "tree", "table", "worldmap", "globe", "minimap"].includes(n.kind);
 }
 
 function sizeStyle(n, dir) {
@@ -233,6 +234,21 @@ function renderCustom(n, dir, sz, st) {
       }).join("");
       return `<div class="sysbar ${esc(a.align || "")}" style="${sz}">${pills}</div>`;
     }
+    case "worldmap":
+    case "globe":
+      // the picture is a canvas the skin fills from the engine (maps()); the engine's view state rides along as data-st
+      return `<div class="map${foc}" style="${sz}" data-id="${id}" data-map="${n.kind}" data-labels="${a.labels ? 1 : ""}" data-lang="${esc(a.lang || "")}" data-st="${esc(JSON.stringify(s))}"><canvas></canvas><div class="lbls"></div><div class="mapcap"></div></div>`;
+    case "minimap": {
+      const d = s.series || [], rows = Math.min(d.length, 96), per = d.length / (rows || 1);
+      const bars = Array.from({ length: rows }, (_, i) => {
+        const a0 = Math.floor(i * per), a1 = Math.max(a0 + 1, Math.floor((i + 1) * per));
+        let m = 0; for (let k = a0; k < a1 && k < d.length; k++) m += d[k]; m /= a1 - a0;
+        const hit = (s.marks || []).some((q) => q >= a0 && q < a1);
+        return `<i style="width:${(m * 100).toFixed(1)}%"${hit ? ' class="mk"' : ""}></i>`;
+      }).join("");
+      const n = Math.max(1, d.length);
+      return `<div class="mm${foc}" style="${sz}" data-id="${id}" data-mm="${d.length}"><div class="mmr">${bars}</div><u class="mmv" data-sp="tp:${(s.offset / n * 100).toFixed(2)};h:${Math.min(100, s.page / n * 100).toFixed(2)}"></u></div>`;
+    }
     default: return `<div class="unk" style="${sz}">${esc(n.kind)}</div>`;
   }
 }
@@ -246,6 +262,10 @@ function morph(from, to) {
   // a different page / block (data-blk) is a different thing: replace it, so its parts enter fresh
   if (from.nodeType === 1 && from.getAttribute("data-blk") !== to.getAttribute("data-blk")) { from.replaceWith(to.cloneNode(true)); return; }
   if (from.nodeType === 3) { if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue; return; }
+  if (from.nodeType === 1 && from.hasAttribute("data-map")) { // the map's insides belong to maps(); only its attributes follow
+    for (const { name, value } of [...to.attributes]) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
+    return;
+  }
   const mx = from.style && from.style.getPropertyValue("--mx"), my = from.style && from.style.getPropertyValue("--my");
   for (const { name } of [...from.attributes]) if (!to.hasAttribute(name)) from.removeAttribute(name);
   for (const { name, value } of [...to.attributes]) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
@@ -268,7 +288,7 @@ const KEYS = { Enter: "enter", Tab: "tab", Escape: "esc", Backspace: "backspace"
 export async function mountSkin(root, o = {}) {
   styleOnce();
   const eng = await engine(o);
-  const { x, call, put, read } = eng;
+  const { x, call, put, read, dec } = eng;
   x.lz_resize(120, 40);
   root.classList.add("lz");
   root.tabIndex = 0;
@@ -349,6 +369,82 @@ export async function mountSkin(root, o = {}) {
     }
   }
 
+  // ---- maps: the engine shades the planet, the skin puts the pixels on a canvas ------------------------------------
+  const MAXPX = 340000; // pixels per picture: the shader is per pixel, the canvas is scaled up by CSS
+  function maps() {
+    for (const m of root.querySelectorAll(".map")) {
+      const cv = m.querySelector("canvas"), cw = m.clientWidth, ch = m.clientHeight;
+      if (!cv || cw < 8 || ch < 8) continue;
+      const k = Math.min(1, Math.sqrt(MAXPX / (cw * ch))) * Math.min(2, window.devicePixelRatio || 1), w = Math.max(8, Math.round(cw * k)), h = Math.max(8, Math.round(ch * k));
+      const key = m.dataset.st + "|" + w + "x" + h + "|" + m.dataset.labels;
+      let st = {}; try { st = JSON.parse(m.dataset.st); } catch {}
+      if (m._key !== key) {
+        m._key = key;
+        const [p, pn] = put(m.dataset.id);
+        const n = x.lz_pixels(p, pn, w, h); x.lz_free(p, pn);
+        if (n === w * h * 4) {
+          if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+          const ctx = cv.getContext("2d");
+          ctx.putImageData(new ImageData(new Uint8ClampedArray(x.memory.buffer.slice(x.lz_pix_ptr(), x.lz_pix_ptr() + n)), w, h), 0, 0);
+          let names = [];
+          try { names = JSON.parse(dec.decode(new Uint8Array(x.memory.buffer, x.lz_aux_ptr(), x.lz_aux_len()))); } catch {}
+          m.querySelector(".lbls").innerHTML = names.map((l) => `<span style="left:${(l.x / w * 100).toFixed(2)}%;top:${(l.y / h * 100).toFixed(2)}%">${esc(l.t)}</span>`).join("");
+        }
+      }
+      const cap = m.querySelector(".mapcap"), sel = st.sel;
+      if (sel) {
+        const pl = m.dataset.lang === "pl";
+        cap.innerHTML = `<b>${esc(pl ? sel.pl : sel.en)}</b><span>${esc(sel.continent)}</span><span>${sel.pop_m} M · $${sel.gdp_bn} B</span>`;
+        cap.classList.add("on");
+      } else cap.classList.remove("on");
+    }
+  }
+
+  // drag pans the map or turns the globe, the wheel zooms, a click that did not move picks a country: all in canvas pixels
+  let mapDrag = null, utcT = 0;
+  const mapPt = (m, e) => { const cv = m.querySelector("canvas"), r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * cv.width, (e.clientY - r.top) / r.height * cv.height]; };
+  root.addEventListener("pointerdown", (e) => {
+    const m = e.target.closest ? e.target.closest(".map") : null;
+    if (!m || e.button !== 0) return;
+    mapDrag = { m, p: mapPt(m, e), x: e.clientX, y: e.clientY, moved: false };
+    try { m.setPointerCapture(e.pointerId); } catch {}
+    act(m.dataset.id, "focus"); m.classList.add("grab");
+  });
+  root.addEventListener("pointermove", (e) => {
+    if (!mapDrag) return;
+    const { m } = mapDrag, to = mapPt(m, e);
+    if (!mapDrag.moved && Math.hypot(e.clientX - mapDrag.x, e.clientY - mapDrag.y) < 4) return;
+    mapDrag.moved = true;
+    act(m.dataset.id, "pan", `${mapDrag.p[0]},${mapDrag.p[1]},${to[0]},${to[1]}`);
+    mapDrag.p = to;
+    pump();
+  });
+  addEventListener("pointerup", (e) => {
+    if (!mapDrag) return;
+    const { m, moved } = mapDrag; mapDrag = null; m.classList.remove("grab");
+    if (!moved) { const p = mapPt(m, e); act(m.dataset.id, "pick", `${p[0]},${p[1]}`); pump(); }
+  });
+  root.addEventListener("wheel", (e) => {
+    const m = e.target.closest ? e.target.closest(".map") : null;
+    if (!m) return;
+    e.preventDefault();
+    const p = mapPt(m, e);
+    act(m.dataset.id, "zoom", `${e.deltaY < 0 ? 1.25 : 0.8},${p[0]},${p[1]}`);
+    pump();
+  }, { passive: false });
+  root.addEventListener("dblclick", (e) => {
+    const m = e.target.closest ? e.target.closest(".map") : null;
+    if (!m) return;
+    const p = mapPt(m, e);
+    act(m.dataset.id, "zoom", `2,${p[0]},${p[1]}`); pump();
+  });
+  // a minimap: press or drag anywhere on it seeks to that line
+  let mmDrag = null;
+  const mmSeek = (m, e) => { const r = m.getBoundingClientRect(), n = +m.dataset.mm || 1; act(m.dataset.id, "seek", String(Math.floor(Math.max(0, Math.min(0.9999, (e.clientY - r.top) / r.height)) * n))); pump(); };
+  root.addEventListener("pointerdown", (e) => { const m = e.target.closest ? e.target.closest(".mm") : null; if (m && e.button === 0) { mmDrag = m; try { m.setPointerCapture(e.pointerId); } catch {} mmSeek(m, e); } });
+  root.addEventListener("pointermove", (e) => { if (mmDrag) mmSeek(mmDrag, e); });
+  addEventListener("pointerup", () => { mmDrag = null; });
+
   function draw() {
     const tree = JSON.parse(read(x.lz_describe()));
     const json = JSON.stringify(tree);
@@ -372,6 +468,8 @@ export async function mountSkin(root, o = {}) {
     clocks();
     springs();
     track();
+    maps();
+    if (root.querySelector(".map") && !utcT) { utcT = setInterval(() => feed({ utc: Date.now() / 1000 }), 30000); feed({ utc: Date.now() / 1000 }); }
     if (root.querySelector(".sysbar")) startFeed();
   }
 
@@ -425,7 +523,7 @@ export async function mountSkin(root, o = {}) {
   root.addEventListener("pointermove", (e) => {
     const p = e.target.closest ? e.target.closest(".panel") : null;
     if (hot && hot !== p) unlean();
-    if (!p) return;
+    if (!p || e.target.closest(".map,.mm")) { if (hot) unlean(); return; } // a map under the pointer holds still
     const r = p.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
     if (fx("spot")) { p.style.setProperty("--mx", mx + "px"); p.style.setProperty("--my", my + "px"); }
     if (fx("tilt") && r.width > 40 && r.height > 40) {
@@ -509,6 +607,6 @@ export async function mountSkin(root, o = {}) {
     accent(c) { root.style.setProperty("--accent", c); },
     feed,
     describe() { return JSON.parse(read(x.lz_describe())); },
-    destroy() { dead = true; clearTimeout(timer); cancelAnimationFrame(raf); clearInterval(clockTimer); feedStop(); if (MOTION === motion) MOTION = null; },
+    destroy() { dead = true; clearTimeout(timer); cancelAnimationFrame(raf); clearInterval(clockTimer); clearInterval(utcT); feedStop(); if (MOTION === motion) MOTION = null; },
   };
 }

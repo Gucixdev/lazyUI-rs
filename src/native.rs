@@ -137,6 +137,10 @@ pub trait Widget {
     fn act(&mut self, _action: &str, _arg: &str, _cx: &mut EvCx) -> Res {
         Res::Ignored
     }
+    /// A picture in real pixels for a skin that has them (`w` x `h`): RGBA bytes plus a JSON side channel (labels).
+    fn pixels(&mut self, _cx: &Cx, _w: i32, _h: i32) -> Option<(Vec<u8>, String)> {
+        None
+    }
     /// Time passed (virtual clock). May emit events and set bound keys, like a key press.
     fn tick(&mut self, _dt: f64, _cx: &mut EvCx) {}
     /// Drawn after everything else, so a popup can lie over its neighbours.
@@ -175,7 +179,7 @@ pub struct Def {
     pub make: fn() -> Box<dyn Widget>,
 }
 
-const TABLES: [&[Def]; 4] = [crate::charts::DEFS, crate::lists::DEFS, crate::timers::DEFS, crate::sys::DEFS];
+const TABLES: [&[Def]; 5] = [crate::charts::DEFS, crate::lists::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS];
 
 pub fn find(name: &str) -> Option<&'static Def> {
     all().find(|d| d.name == name)
