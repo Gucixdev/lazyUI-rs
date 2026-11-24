@@ -70,7 +70,7 @@ lazyui select [--multi] [--prompt P] < lines        inline picker; the chosen li
 
 Inline mode is the default for `select`; `run` takes `--inline N` (rows) or the alternate screen.
 
-## Decisions taken without asking (defaults; changeable, see claude-config/questions.md)
+## Early decisions (defaults, changeable)
 
 1. Crate and binary name `lazyui`; repo dir stays `lazyUI-rs`. MIT.
 2. Only dependency: `libc` (termios, poll, ioctl). No async runtime, no serde (a 150-line JSON writer is enough; reading model updates
@@ -81,7 +81,7 @@ Inline mode is the default for `select`; `run` takes `--inline N` (rows) or the 
 6. First slice: canvas, layout, anim, theme, spec, widgets {text, panel, progress, list, input, buttons, keybar}, headless, `snap`,
    `tree`, `script`, `run`, `select`.
 
-## Honest gaps
+## Known gaps
 
 Written down so nobody has to discover them: no Windows console, no IME, no kitty graphics, wide/emoji clusters follow `unicode-width`
 rules only as far as a small built-in table goes (CJK + common emoji), no accessibility tree beyond `tree`.

@@ -1,6 +1,6 @@
 # lazytui (C) - what matters
 
-His own C library, copy in `references/lazytui/` (canonical: `github/lazytui`). Read: `DESIGN.md`, `README.md`, `include/lazytui.h`.
+The author's C library (`Gucixdev/lazytui`). Read: `DESIGN.md`, `README.md`, `include/lazytui.h`.
 This is the *base* of the mix: lazyui is the Rust sibling, and the spec language is shared.
 
 ## Game changers
@@ -8,7 +8,7 @@ This is the *base* of the mix: lazyui is the Rust sibling, and the spec language
 1. **`lt_app`: the whole UI is data.** An indented text spec (`col`, `panel title=..`, `progressbar bind=progress`, `searchbar id=q`)
    + a key/value *model* + named events `(id, kind)`. "Nothing in a spec is code." Errors carry the line number. `lt_app_render` and
    `lt_app_dispatch` run with no terminal, so every UI is testable as text. This is already what rune (`--tree`) and slint (`.slint`)
-   are reaching for; he had it first.
+   are reaching for; it came first.
 2. **Canvas of cells + diff**, colour quantised to the terminal (truecolour -> 256 -> 16 -> 8), ASCII fallback, works on the Linux
    console (`TERM=linux`: no alternate screen, 16 colours). Wide glyphs handled.
 3. **Cassowary layout** with strengths: required constraints always hold, a minimum width is a strong *wish*, so tiny terminals degrade
