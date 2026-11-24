@@ -1,5 +1,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod app;
+pub mod attrs;
 pub mod build;
 pub mod components;
 pub mod dnd;
@@ -11,6 +12,7 @@ pub mod input;
 pub mod layout;
 pub mod lists;
 pub mod native;
+pub mod plan;
 pub mod prelude;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;

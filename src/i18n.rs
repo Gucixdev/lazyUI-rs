@@ -231,8 +231,8 @@ impl Catalog {
                     .join(";"),
                 _ => self.resolve(v).into_owned(),
             };
-            if &new != v {
-                el.attrs.insert(k.to_string(), new);
+            if new != v {
+                el.attrs.insert(k, &new);
             }
         }
         for c in &mut el.children {

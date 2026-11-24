@@ -4,7 +4,8 @@
 use crate::anim::Spring;
 use crate::canvas::{Canvas, Rect, Style};
 use crate::input::{key_name, parse_key, Event, Key, Mods, MouseKind};
-use crate::layout::{split, Dir, Size};
+use crate::layout::{split_into, Dir, Scratch, Size};
+use crate::plan::{Placed, Plan};
 use crate::theme::Theme;
 use crate::widgets::{draw_keybar, draw_panel, draw_progress, draw_text, Align, Buttons, Input, List, Res};
 use std::collections::HashMap;
@@ -81,19 +82,19 @@ impl Kind {
 #[derive(Clone, Debug)]
 pub struct El {
     pub kind: Kind,
-    pub attrs: HashMap<String, String>,
+    pub attrs: crate::attrs::Attrs,
     pub children: Vec<El>,
 }
 
 impl El {
     pub fn new(kind: Kind) -> El {
-        El { kind, attrs: HashMap::new(), children: Vec::new() }
+        El { kind, attrs: Default::default(), children: Vec::new() }
     }
     pub fn attr(&self, k: &str) -> Option<&str> {
-        self.attrs.get(k).map(|s| s.as_str())
+        self.attrs.get(k)
     }
     pub fn set(mut self, k: &str, v: impl ToString) -> El {
-        self.attrs.insert(k.to_string(), v.to_string());
+        self.attrs.insert(k, &v.to_string());
         self
     }
     pub fn id(self, id: &str) -> El {
@@ -192,7 +193,7 @@ fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::compon
             if k == "size" && Size::parse(v).is_none() {
                 return Err(format!("{n}: size `{v}` is not N, fill, fill:W, pct:P, min:N or max:N"));
             }
-            el.attrs.insert(k.to_string(), v.to_string());
+            el.attrs.insert(k, v);
         }
         // close everything at the same or deeper indent
         while let Some((i, _)) = stack.last() {
@@ -344,13 +345,12 @@ enum WState {
     Custom(Box<dyn crate::native::Widget>),
 }
 
-#[derive(Clone, Debug)]
-struct Placed {
-    id: String,
-    kind: Kind,
-    rect: Rect,
-    path: Vec<usize>,
-    parent: Option<usize>,
+/// Scratch the layout walk reuses from one frame to the next, so a relayout allocates nothing once it is warm.
+#[derive(Default)]
+struct Stacks {
+    sizes: Vec<Size>,
+    rects: Vec<Rect>,
+    scratch: Scratch,
 }
 
 pub struct Ui {
@@ -364,8 +364,14 @@ pub struct Ui {
     states: HashMap<String, WState>,
     springs: HashMap<String, Spring>,
     focus: Option<String>,
-    placed: Vec<Placed>,
+    placed: Plan,
+    stacks: Stacks,
     size: (i32, i32),
+    /// what `placed` was computed for: the canvas size and `gen`; layout is skipped while both still hold
+    laid: Option<((i32, i32), u64)>,
+    /// bumped when the tree is swapped or a model key the layout reads (a `pages` bind) changes
+    gen: u64,
+    layout_keys: Vec<String>,
     events: Vec<UiEvent>,
     hotkeys: Vec<(Key, Mods, String)>,
     every: Vec<(f64, f64, String)>,
@@ -377,6 +383,7 @@ pub struct Ui {
 
 impl Ui {
     pub fn new(root: El) -> Ui {
+        let layout_keys = Ui::layout_keys_of(&root);
         Ui {
             root,
             raw: None,
@@ -387,8 +394,12 @@ impl Ui {
             states: HashMap::new(),
             springs: HashMap::new(),
             focus: None,
-            placed: Vec::new(),
+            placed: Plan::default(),
+            stacks: Stacks::default(),
             size: (0, 0),
+            laid: None,
+            gen: 0,
+            layout_keys,
             events: Vec::new(),
             hotkeys: Vec::new(),
             every: Vec::new(),
@@ -421,7 +432,25 @@ impl Ui {
             }
             None => self.root = root,
         }
+        self.layout_keys = Ui::layout_keys_of(&self.root);
+        self.gen += 1;
         self.dirty = true;
+    }
+    /// The model keys that decide where things go: the `bind` of every `pages`.
+    fn layout_keys_of(el: &El) -> Vec<String> {
+        let mut out = Vec::new();
+        fn walk(el: &El, out: &mut Vec<String>) {
+            if el.kind == Kind::Pages {
+                if let Some(k) = el.attr("bind") {
+                    out.push(k.to_string());
+                }
+            }
+            for c in &el.children {
+                walk(c, out);
+            }
+        }
+        walk(el, &mut out);
+        out
     }
     /// Translate every text written as `@key` (see `i18n`) with this catalog, now and in every later tree; `None` turns it off.
     pub fn set_catalog(&mut self, catalog: Option<crate::i18n::Catalog>) {
@@ -457,6 +486,9 @@ impl Ui {
     fn put(&mut self, key: &str, v: Value) {
         if self.model.get(key) != Some(&v) {
             self.model.insert(key.to_string(), v);
+            if self.layout_keys.iter().any(|k| k == key) {
+                self.gen += 1;
+            }
             self.dirty = true;
         }
     }
@@ -541,7 +573,7 @@ impl Ui {
         self.focus.as_deref()
     }
     pub fn focus(&mut self, id: &str) -> bool {
-        if self.placed.iter().any(|p| p.id == id && p.kind.focusable()) {
+        if self.placed.iter().any(|p| p.kind.focusable() && p.id() == id) {
             self.focus = Some(id.to_string());
             self.dirty = true;
             true
@@ -550,7 +582,7 @@ impl Ui {
         }
     }
     pub fn rect_of(&self, id: &str) -> Option<Rect> {
-        self.placed.iter().find(|p| p.id == id).map(|p| p.rect)
+        self.placed.index_of(id).map(|i| self.placed.rect(i))
     }
     pub fn size(&self) -> (i32, i32) {
         self.size
@@ -568,7 +600,7 @@ impl Ui {
                 self.dirty = true;
             }
         }
-        let custom: Vec<(String, Vec<usize>)> = self.placed.iter().filter(|p| matches!(p.kind, Kind::Custom(_))).map(|p| (p.id.clone(), p.path.clone())).collect();
+        let custom: Vec<(String, Vec<u32>)> = self.placed.iter().filter(|p| matches!(p.kind, Kind::Custom(_))).map(|p| (p.id().to_string(), p.path().to_vec())).collect();
         for (id, path) in custom {
             let Some(el) = Ui::el_at(&self.root, &path).cloned() else { continue };
             if let Some(WState::Custom(w)) = self.states.get_mut(&id) {
@@ -622,19 +654,12 @@ impl Ui {
 
     // ---- layout -----------------------------------------------------------------------------------
 
-    fn el_at<'a>(root: &'a El, path: &[usize]) -> Option<&'a El> {
+    fn el_at<'a>(root: &'a El, path: &[u32]) -> Option<&'a El> {
         let mut e = root;
         for &i in path {
-            e = e.children.get(i)?;
+            e = e.children.get(i as usize)?;
         }
         Some(e)
-    }
-
-    fn node_id(el: &El, kind: Kind, path: &[usize]) -> String {
-        match el.attr("id") {
-            Some(i) if !i.is_empty() => i.to_string(),
-            _ => format!("{}@{}", kind.name(), path.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(".")),
-        }
     }
 
     fn default_size(kind: Kind, in_col: bool) -> Size {
@@ -645,9 +670,9 @@ impl Ui {
         }
     }
 
-    fn place(&self, el: &El, r: Rect, path: &mut Vec<usize>, parent: Option<usize>, out: &mut Vec<Placed>) {
-        let me = out.len();
-        out.push(Placed { id: Ui::node_id(el, el.kind, path), kind: el.kind, rect: r, path: path.clone(), parent });
+    fn place(&self, el: &El, r: Rect, path: &mut Vec<u32>, parent: Option<usize>, plan: &mut Plan, st: &mut Stacks) {
+        let me = plan.len();
+        plan.push(el.kind, r, parent, path, el.attr("id"));
         if !el.kind.container() {
             return;
         }
@@ -661,36 +686,47 @@ impl Ui {
                 None => el.attr("active").and_then(|s| s.parse().ok()).unwrap_or(0),
             };
             if let Some(c) = el.children.get(which) {
-                path.push(which);
-                self.place(c, inner, path, Some(me), out);
+                path.push(which as u32);
+                self.place(c, inner, path, Some(me), plan, st);
                 path.pop();
             }
             return;
         }
         let dir = if el.kind == Kind::Row { Dir::Row } else { Dir::Col };
-        let sizes: Vec<Size> = el
-            .children
-            .iter()
-            .map(|c| c.attr("size").and_then(Size::parse).unwrap_or_else(|| Ui::default_size(c.kind, dir == Dir::Col)))
-            .collect();
-        let rects = split(inner, dir, &sizes, gap);
-        for (i, (c, cr)) in el.children.iter().zip(rects).enumerate() {
-            path.push(i);
-            self.place(c, cr, path, Some(me), out);
+        // sizes and rectangles live on stacks shared by the whole walk: a container pushes its own, its children push theirs
+        // above, and it pops back to where it started
+        let (base_s, base_r) = (st.sizes.len(), st.rects.len());
+        st.sizes.extend(el.children.iter().map(|c| c.attr("size").and_then(Size::parse).unwrap_or_else(|| Ui::default_size(c.kind, dir == Dir::Col))));
+        {
+            let Stacks { sizes, rects, scratch } = &mut *st;
+            split_into(rects, scratch, inner, dir, &sizes[base_s..], gap);
+        }
+        st.sizes.truncate(base_s);
+        for (i, c) in el.children.iter().enumerate() {
+            let cr = st.rects[base_r + i];
+            path.push(i as u32);
+            self.place(c, cr, path, Some(me), plan, st);
             path.pop();
         }
+        st.rects.truncate(base_r);
     }
 
     pub fn relayout(&mut self, w: i32, h: i32) {
-        let mut out = Vec::new();
-        let mut path = Vec::new();
-        self.place(&self.root, Rect::new(0, 0, w, h), &mut path, None, &mut out);
-        self.placed = out;
+        if self.placed.is_empty() || self.laid != Some(((w, h), self.gen)) {
+            let mut plan = std::mem::take(&mut self.placed);
+            let mut st = std::mem::take(&mut self.stacks);
+            plan.clear();
+            let mut path = Vec::new();
+            self.place(&self.root, Rect::new(0, 0, w, h), &mut path, None, &mut plan, &mut st);
+            self.placed = plan;
+            self.stacks = st;
+            self.laid = Some(((w, h), self.gen));
+        }
         self.size = (w, h);
         // focus must point at something that exists
-        let ok = self.focus.as_ref().map(|f| self.placed.iter().any(|p| &p.id == f && p.kind.focusable())).unwrap_or(false);
+        let ok = self.focus.as_ref().map(|f| self.placed.iter().any(|p| p.kind.focusable() && &p.id() == f)).unwrap_or(false);
         if !ok {
-            self.focus = self.placed.iter().find(|p| p.kind.focusable()).map(|p| p.id.clone());
+            self.focus = self.placed.iter().find(|p| p.kind.focusable()).map(|p| p.id().to_string());
         }
     }
 
@@ -700,31 +736,38 @@ impl Ui {
         c.clear(self.theme.base());
         self.relayout(c.w, c.h);
         let focus_chain = self.focus_chain();
-        let placed = self.placed.clone();
+        // taken, not cloned: drawing never looks elements up, and the vector goes back below
+        let placed = std::mem::take(&mut self.placed);
         let root = std::mem::replace(&mut self.root, El::new(Kind::Spacer));
+        let screen = Rect::new(0, 0, c.w, c.h);
         for (i, p) in placed.iter().enumerate() {
-            let Some(el) = Ui::el_at(&root, &p.path) else { continue };
+            // an element with no cell on the canvas draws nothing; a custom widget may paint outside its rect (popups)
+            if !matches!(p.kind, Kind::Custom(_)) && p.rect.intersect(&screen).is_empty() {
+                continue;
+            }
+            let Some(el) = Ui::el_at(&root, &p.path()) else { continue };
             self.draw_one(c, el, p, focus_chain.contains(&i));
         }
         for p in placed.iter().filter(|p| matches!(p.kind, Kind::Custom(_))) {
-            let Some(el) = Ui::el_at(&root, &p.path) else { continue };
-            let focused = self.focus.as_deref() == Some(p.id.as_str());
-            if let Some(WState::Custom(w)) = self.states.get_mut(&p.id) {
+            let Some(el) = Ui::el_at(&root, &p.path()) else { continue };
+            let focused = self.focus.as_deref() == Some(p.id());
+            if let Some(WState::Custom(w)) = self.states.get_mut(p.id()) {
                 let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, focused, unicode: c.caps.unicode, time: self.clock };
                 w.overlay(c, p.rect, &cx);
             }
         }
         self.root = root;
+        self.placed = placed;
         self.draw_drag(c);
         self.dirty = false;
     }
 
     fn focus_chain(&self) -> Vec<usize> {
         let mut chain = Vec::new();
-        let mut cur = self.focus.as_ref().and_then(|f| self.placed.iter().position(|p| &p.id == f));
+        let mut cur = self.focus.as_ref().and_then(|f| self.placed.index_of(f));
         while let Some(i) = cur {
             chain.push(i);
-            cur = self.placed[i].parent;
+            cur = self.placed.parent(i);
         }
         chain
     }
@@ -736,7 +779,7 @@ impl Ui {
         }
     }
 
-    fn draw_one(&mut self, c: &mut Canvas, el: &El, p: &Placed, in_focus: bool) {
+    fn draw_one(&mut self, c: &mut Canvas, el: &El, p: Placed, in_focus: bool) {
         let t = self.theme.clone();
         let r = p.rect;
         match el.kind {
@@ -768,7 +811,7 @@ impl Ui {
                     None => el.attr("value").and_then(|s| s.parse().ok()).unwrap_or(0.0),
                 };
                 let target = if raw.is_finite() { (raw / max).clamp(0.0, 1.0) } else { 0.0 };
-                let sp = self.springs.entry(p.id.clone()).or_insert_with(|| Spring::smooth(target));
+                let sp = self.springs.entry(p.id().to_string()).or_insert_with(|| Spring::smooth(target));
                 sp.retarget(target);
                 let shown = sp.x;
                 let mut rr = r;
@@ -787,12 +830,12 @@ impl Ui {
                 let prompt = el.attr("prompt").unwrap_or("> ").to_string();
                 let key = el.attr("bind").map(|s| s.to_string());
                 let init = key.as_ref().map(|k| self.text_of(k)).unwrap_or_default();
-                let st = self.states.entry(p.id.clone()).or_insert_with(|| WState::Input(Input::new(&init)));
+                let st = self.states.entry(p.id().to_string()).or_insert_with(|| WState::Input(Input::new(&init)));
                 if let WState::Input(inp) = st {
                     if key.is_some() {
                         inp.set(&init);
                     }
-                    inp.draw(c, r, &prompt, &t, self.focus.as_deref() == Some(p.id.as_str()));
+                    inp.draw(c, r, &prompt, &t, self.focus.as_deref() == Some(p.id()));
                 }
             }
             Kind::Buttons => {
@@ -800,7 +843,7 @@ impl Ui {
                 let active = el.attr("active").map(|k| self.number(k).max(0.0) as usize);
                 let prompt = el.attr("prompt").unwrap_or("").to_string();
                 let src = items.join("\u{1}");
-                let st = self.states.entry(p.id.clone()).or_insert_with(|| WState::Buttons(Buttons::new(items.clone()), src.clone()));
+                let st = self.states.entry(p.id().to_string()).or_insert_with(|| WState::Buttons(Buttons::new(items.clone()), src.clone()));
                 if let WState::Buttons(b, s) = st {
                     if *s != src {
                         b.labels = items;
@@ -810,15 +853,15 @@ impl Ui {
                     if active.is_some() {
                         b.active = active;
                     }
-                    b.draw(c, r, &prompt, &t, self.focus.as_deref() == Some(p.id.as_str()));
+                    b.draw(c, r, &prompt, &t, self.focus.as_deref() == Some(p.id()));
                 }
             }
             Kind::List => {
                 let items = split_items(el.attr("items").unwrap_or(""));
                 let src = items.join("\u{1}");
                 let filter = el.attr("filter").map(|k| self.text_of(k));
-                let focused = self.focus.as_deref() == Some(p.id.as_str());
-                let st = self.states.entry(p.id.clone()).or_insert_with(|| WState::List(List::new(items.clone()), src.clone()));
+                let focused = self.focus.as_deref() == Some(p.id());
+                let st = self.states.entry(p.id().to_string()).or_insert_with(|| WState::List(List::new(items.clone()), src.clone()));
                 if let WState::List(l, s) = st {
                     // `items` in the spec only fills the list while the program has not set rows itself
                     if el.attr("items").is_some() && *s != src {
@@ -833,8 +876,8 @@ impl Ui {
             }
             Kind::Custom(name) => {
                 let Some(def) = crate::native::find(name) else { return };
-                let focused = self.focus.as_deref() == Some(p.id.as_str());
-                let st = self.states.entry(p.id.clone()).or_insert_with(|| WState::Custom((def.make)()));
+                let focused = self.focus.as_deref() == Some(p.id());
+                let st = self.states.entry(p.id().to_string()).or_insert_with(|| WState::Custom((def.make)()));
                 if let WState::Custom(w) = st {
                     let cx = crate::native::Cx { el, theme: &t, model: &self.model, focused, unicode: c.caps.unicode, time: self.clock };
                     w.draw(c, r, &cx);
@@ -860,11 +903,11 @@ impl Ui {
 
     fn focused_kind(&self) -> Option<Kind> {
         let f = self.focus.as_ref()?;
-        self.placed.iter().find(|p| &p.id == f).map(|p| p.kind)
+        self.placed.index_of(f).map(|i| self.placed.kind(i))
     }
 
     fn cycle_focus(&mut self, back: bool) {
-        let ids: Vec<String> = self.placed.iter().filter(|p| p.kind.focusable()).map(|p| p.id.clone()).collect();
+        let ids: Vec<String> = self.placed.iter().filter(|p| p.kind.focusable()).map(|p| p.id().to_string()).collect();
         if ids.is_empty() {
             return;
         }
@@ -926,7 +969,7 @@ impl Ui {
                 if let Some(done) = self.dnd_mouse(kind, *x, *y) {
                     return done;
                 }
-                let hit = self.placed.iter().rev().find(|p| p.kind.focusable() && self.extent_of(p).contains(*x, *y)).map(|p| p.id.clone());
+                let hit = self.placed.iter().rev().find(|p| p.kind.focusable() && self.extent_of(*p).contains(*x, *y)).map(|p| p.id().to_string());
                 match hit {
                     Some(id) => {
                         if matches!(kind, MouseKind::Down(0)) && self.focus.as_deref() != Some(id.as_str()) {
@@ -937,8 +980,8 @@ impl Ui {
                     }
                     None => {
                         if matches!(kind, MouseKind::Down(0)) {
-                            if let Some(p) = self.placed.iter().rev().find(|p| p.rect.contains(*x, *y) && !p.id.contains('@')) {
-                                let id = p.id.clone();
+                            let hit = self.placed.iter().rev().find(|p| p.rect.contains(*x, *y) && !p.id().contains('@')).map(|p| p.id().to_string());
+                            if let Some(id) = hit {
                                 self.emit(&id, "click", "", 0.0);
                             }
                         }
@@ -949,28 +992,28 @@ impl Ui {
         }
     }
 
-    fn attr_at(&self, p: &Placed, k: &str) -> Option<String> {
-        Ui::el_at(&self.root, &p.path).and_then(|e| e.attr(k)).map(String::from)
+    fn attr_at(&self, p: Placed, k: &str) -> Option<String> {
+        Ui::el_at(&self.root, &p.path()).and_then(|e| e.attr(k)).map(String::from)
     }
 
     /// The element under the pointer that takes a drop of `kind`, topmost first.
-    fn drop_target(&self, x: i32, y: i32, kind: &str) -> Option<Placed> {
+    fn drop_target(&self, x: i32, y: i32, kind: &str) -> Option<(String, Rect)> {
         self.placed
             .iter()
             .rev()
-            .find(|p| p.rect.contains(x, y) && !p.id.contains('@') && self.attr_at(p, "drop").is_some_and(|a| crate::dnd::accepts(&a, kind)))
-            .cloned()
+            .find(|p| p.rect.contains(x, y) && !p.id().contains('@') && self.attr_at(*p, "drop").is_some_and(|a| crate::dnd::accepts(&a, kind)))
+            .map(|p| (p.id().to_string(), p.rect))
     }
 
     /// Drag and drop on top of the plain mouse handling: `Some(handled)` when the event was part of a drag.
     fn dnd_mouse(&mut self, kind: &MouseKind, x: i32, y: i32) -> Option<bool> {
         match kind {
             MouseKind::Down(0) => {
-                let src = self.placed.iter().rev().find(|p| p.rect.contains(x, y) && !p.id.contains('@') && self.attr_at(p, "drag").is_some()).cloned();
+                let src = self.placed.iter().rev().find(|p| p.rect.contains(x, y) && !p.id().contains('@') && self.attr_at(*p, "drag").is_some());
                 if let Some(p) = src {
-                    let payload = self.attr_at(&p, "drag").unwrap_or_default();
-                    let kind = self.attr_at(&p, "dragkind").unwrap_or_else(|| "any".into());
-                    self.dnd.press(&p.id, &payload, &kind, x, y);
+                    let payload = self.attr_at(p, "drag").unwrap_or_default();
+                    let kind = self.attr_at(p, "dragkind").unwrap_or_else(|| "any".into());
+                    self.dnd.press(&p.id(), &payload, &kind, x, y);
                 }
                 None
             }
@@ -991,8 +1034,8 @@ impl Ui {
             MouseKind::Up(0) => {
                 let d = self.dnd.release()?;
                 let target = self.drop_target(x, y, &d.kind);
-                if let Some(t) = &target {
-                    self.emit(&t.id, "drop", &d.payload, 0.0);
+                if let Some((tid, _)) = &target {
+                    self.emit(tid, "drop", &d.payload, 0.0);
                 }
                 self.emit(&d.from, "dragend", &d.payload, if target.is_some() { 1.0 } else { 0.0 });
                 self.dirty = true;
@@ -1005,23 +1048,23 @@ impl Ui {
     /// The target that would take the drop and the payload riding along with the pointer.
     fn draw_drag(&self, c: &mut Canvas) {
         let Some(d) = self.dnd.active() else { return };
-        if let Some(t) = self.drop_target(d.pos.0, d.pos.1, &d.kind) {
-            c.border(t.rect, "", self.theme.accent_style(), self.theme.accent_style());
+        if let Some((_, rect)) = self.drop_target(d.pos.0, d.pos.1, &d.kind) {
+            c.border(rect, "", self.theme.accent_style(), self.theme.accent_style());
         }
         let label = format!(" {} ", d.payload);
         c.text_fit(d.pos.0 + 1, d.pos.1 + 1, (c.w - d.pos.0 - 1).max(0), &label, self.theme.selected(true));
     }
 
-    fn extent_of(&self, p: &Placed) -> Rect {
-        match self.states.get(&p.id) {
+    fn extent_of(&self, p: Placed) -> Rect {
+        match self.states.get(p.id()) {
             Some(WState::Custom(w)) => w.extent(p.rect),
             _ => p.rect,
         }
     }
 
     fn widget_event(&mut self, id: &str, ev: &Event) -> Res {
-        let Some(p) = self.placed.iter().find(|p| p.id == id).cloned() else { return Res::Ignored };
-        let Some(el) = Ui::el_at(&self.root, &p.path).cloned() else { return Res::Ignored };
+        let Some(p) = self.placed.index_of(id).map(|i| self.placed.get(i)) else { return Res::Ignored };
+        let Some(el) = Ui::el_at(&self.root, &p.path()).cloned() else { return Res::Ignored };
         let mut out: Vec<UiEvent> = Vec::new();
         let mut set_model: Vec<(String, Value)> = Vec::new();
         let res = match (self.states.get_mut(id), p.kind) {
@@ -1109,10 +1152,10 @@ impl Ui {
             .iter()
             .filter(|p| {
                 if let Some(id) = q.strip_prefix('#') {
-                    p.id == id
+                    p.id() == id
                 } else if let Some(t) = q.strip_prefix('~') {
                     let t = t.to_lowercase();
-                    let el = Ui::el_at(&self.root, &p.path);
+                    let el = Ui::el_at(&self.root, &p.path());
                     let mut hay: Vec<String> = Vec::new();
                     if let Some(el) = el {
                         for k in ["title", "text", "prompt", "items", "hints", "name"] {
@@ -1124,7 +1167,7 @@ impl Ui {
                             hay.push(self.bound_text(el, "text"));
                         }
                     }
-                    if let Some(WState::Input(i)) = self.states.get(&p.id) {
+                    if let Some(WState::Input(i)) = self.states.get(p.id()) {
                         hay.push(i.text.clone());
                     }
                     hay.iter().any(|h| h.to_lowercase().contains(&t))
@@ -1132,7 +1175,7 @@ impl Ui {
                     p.kind.name() == q
                 }
             })
-            .map(|p| (p.id.clone(), p.kind.name(), p.rect))
+            .map(|p| (p.id().to_string(), p.kind.name(), p.rect))
             .collect()
     }
 
@@ -1140,23 +1183,23 @@ impl Ui {
     /// Call after `render` (state is created while drawing). `focused` marks the element that takes keys.
     pub fn describe_json(&self) -> String {
         fn node(ui: &Ui, i: usize, out: &mut String) {
-            let p = &ui.placed[i];
-            let Some(el) = Ui::el_at(&ui.root, &p.path) else { return };
-            out.push_str(&format!("{{\"id\":{},\"kind\":{}", jstr(&p.id), jstr(p.kind.name())));
-            if ui.focus.as_deref() == Some(p.id.as_str()) {
+            let p = &ui.placed.get(i);
+            let Some(el) = Ui::el_at(&ui.root, &p.path()) else { return };
+            out.push_str(&format!("{{\"id\":{},\"kind\":{}", jstr(&p.id()), jstr(p.kind.name())));
+            if ui.focus.as_deref() == Some(p.id()) {
                 out.push_str(",\"focused\":true");
             }
-            let mut keys: Vec<&String> = el.attrs.keys().collect();
+            let mut keys: Vec<(&str, &str)> = el.attrs.iter().collect();
             keys.sort();
             out.push_str(",\"attrs\":{");
-            for (n, k) in keys.iter().enumerate() {
+            for (n, (k, v)) in keys.iter().enumerate() {
                 if n > 0 {
                     out.push(',');
                 }
-                out.push_str(&format!("{}:{}", jstr(k), jstr(&el.attrs[*k])));
+                out.push_str(&format!("{}:{}", jstr(k), jstr(v)));
             }
             out.push_str("},\"st\":");
-            match (p.kind, ui.states.get(&p.id)) {
+            match (p.kind, ui.states.get(p.id())) {
                 (Kind::Text, _) => out.push_str(&format!("{{\"text\":{}}}", jstr(&ui.bound_text(el, "text")))),
                 (Kind::Progress, _) => {
                     let max = el.attr("max").and_then(|s| s.parse::<f64>().ok()).filter(|m| *m > 0.0).unwrap_or(1.0);
@@ -1179,13 +1222,13 @@ impl Ui {
                     out.push_str(&format!("{{\"items\":[{}],\"cursor\":{},\"active\":{}}}", items.join(","), b.cursor, active));
                 }
                 (Kind::Custom(_), Some(WState::Custom(w))) => {
-                    let focused = ui.focus.as_deref() == Some(p.id.as_str());
+                    let focused = ui.focus.as_deref() == Some(p.id());
                     let cx = crate::native::Cx { el, theme: &ui.theme, model: &ui.model, focused, unicode: true, time: ui.clock };
                     out.push_str(&w.describe(&cx));
                 }
                 _ => out.push_str("{}"),
             }
-            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed[j].parent == Some(i)).collect();
+            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed.parent(j) == Some(i)).collect();
             if !kids.is_empty() {
                 out.push_str(",\"kids\":[");
                 for (n, k) in kids.iter().enumerate() {
@@ -1222,8 +1265,8 @@ impl Ui {
         let q = t.strip_prefix('~').unwrap_or(t).to_lowercase();
         let mut part: Option<(String, usize)> = None;
         let mut hit: Option<(String, usize)> = None;
-        for p in &self.placed {
-            let labels: Vec<String> = match self.states.get(&p.id) {
+        for p in self.placed.iter() {
+            let labels: Vec<String> = match self.states.get(p.id()) {
                 Some(WState::Buttons(b, _)) => b.labels.clone(),
                 Some(WState::List(l, _)) => l.shown_items().into_iter().map(|s| s.to_string()).collect(),
                 _ => continue,
@@ -1231,9 +1274,9 @@ impl Ui {
             for (i, l) in labels.iter().enumerate() {
                 let l = l.to_lowercase();
                 if l == q && hit.is_none() {
-                    hit = Some((p.id.clone(), i));
+                    hit = Some((p.id().to_string(), i));
                 } else if l.contains(&q) && part.is_none() {
-                    part = Some((p.id.clone(), i));
+                    part = Some((p.id().to_string(), i));
                 }
             }
         }
@@ -1255,8 +1298,8 @@ impl Ui {
             let q = t.strip_prefix('~').unwrap_or(t).to_lowercase();
             self.placed
                 .iter()
-                .find(|p| p.kind == Kind::Search && Ui::el_at(&self.root, &p.path).and_then(|e| e.attr("prompt")).is_some_and(|pr| pr.to_lowercase().contains(&q)))
-                .map(|p| p.id.clone())
+                .find(|p| p.kind == Kind::Search && Ui::el_at(&self.root, &p.path()).and_then(|e| e.attr("prompt")).is_some_and(|pr| pr.to_lowercase().contains(&q)))
+                .map(|p| p.id().to_string())
         };
         match id {
             Some(id) if matches!(self.states.get(&id), Some(WState::Input(_))) => self.act(&id, "text", text),
@@ -1267,7 +1310,7 @@ impl Ui {
     /// A semantic action from a skin that lays things out itself: `focus`, `select`, `activate`, `text`, `toggle`...
     /// True when the element took it.
     pub fn act(&mut self, id: &str, action: &str, arg: &str) -> bool {
-        let Some(p) = self.placed.iter().find(|p| p.id == id).cloned() else { return false };
+        let Some(p) = self.placed.index_of(id).map(|i| self.placed.get(i)) else { return false };
         if p.kind.focusable() && self.focus.as_deref() != Some(id) {
             self.focus = Some(id.to_string());
             self.dirty = true;
@@ -1275,7 +1318,7 @@ impl Ui {
         if action == "focus" {
             return p.kind.focusable();
         }
-        let Some(el) = Ui::el_at(&self.root, &p.path).cloned() else { return false };
+        let Some(el) = Ui::el_at(&self.root, &p.path()).cloned() else { return false };
         let mut out: Vec<UiEvent> = Vec::new();
         let mut set_model: Vec<(String, Value)> = Vec::new();
         let done = match (self.states.get_mut(id), p.kind) {
@@ -1359,8 +1402,8 @@ impl Ui {
 
     /// A widget's picture in real pixels (a map for the web skin): RGBA bytes and a JSON side channel. Call after `render`.
     pub fn pixels(&mut self, id: &str, w: i32, h: i32) -> Option<(Vec<u8>, String)> {
-        let p = self.placed.iter().find(|p| p.id == id)?.clone();
-        let el = Ui::el_at(&self.root, &p.path)?;
+        let p = self.placed.index_of(id).map(|i| self.placed.get(i))?;
+        let el = Ui::el_at(&self.root, &p.path())?;
         let focused = self.focus.as_deref() == Some(id);
         match self.states.get_mut(id) {
             Some(WState::Custom(wd)) => {
@@ -1374,10 +1417,10 @@ impl Ui {
     /// The element tree as JSON: what an agent or a test reads instead of looking at pixels.
     pub fn tree_json(&self) -> String {
         fn node(ui: &Ui, i: usize, out: &mut String) {
-            let p = &ui.placed[i];
-            let el = Ui::el_at(&ui.root, &p.path);
-            out.push_str(&format!("{{\"id\":{},\"kind\":{},\"rect\":[{},{},{},{}]", jstr(&p.id), jstr(p.kind.name()), p.rect.x, p.rect.y, p.rect.w, p.rect.h));
-            if ui.focus.as_deref() == Some(p.id.as_str()) {
+            let p = &ui.placed.get(i);
+            let el = Ui::el_at(&ui.root, &p.path());
+            out.push_str(&format!("{{\"id\":{},\"kind\":{},\"rect\":[{},{},{},{}]", jstr(&p.id()), jstr(p.kind.name()), p.rect.x, p.rect.y, p.rect.w, p.rect.h));
+            if ui.focus.as_deref() == Some(p.id()) {
                 out.push_str(",\"focused\":true");
             }
             if let Some(el) = el {
@@ -1390,7 +1433,7 @@ impl Ui {
                     out.push_str(&format!(",\"text\":{}", jstr(&ui.bound_text(el, "text"))));
                 }
             }
-            match ui.states.get(&p.id) {
+            match ui.states.get(p.id()) {
                 Some(WState::List(l, _)) => {
                     out.push_str(&format!(",\"rows\":{}", l.len()));
                     if let Some(t) = l.selected_text() {
@@ -1401,10 +1444,10 @@ impl Ui {
                 Some(WState::Buttons(b, _)) => out.push_str(&format!(",\"items\":[{}],\"cursor\":{}", b.labels.iter().map(|l| jstr(l)).collect::<Vec<_>>().join(","), b.cursor)),
                 Some(WState::Custom(_)) | None => {}
             }
-            if let Some(s) = ui.springs.get(&p.id) {
+            if let Some(s) = ui.springs.get(p.id()) {
                 out.push_str(&format!(",\"value\":{}", jnum((s.target * 1000.0).round() / 1000.0)));
             }
-            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed[j].parent == Some(i)).collect();
+            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed.parent(j) == Some(i)).collect();
             if !kids.is_empty() {
                 out.push_str(",\"children\":[");
                 for (n, k) in kids.iter().enumerate() {
@@ -1517,6 +1560,30 @@ col
         assert!(f.contains("> ta") && f.contains("beta") && !f.contains("alpha") == false || f.contains("beta"));
         assert!(!f.contains("gamma") || f.contains("gamma")); // "gamma" has no "ta"
         assert!(!f.contains("  gamma"));
+    }
+
+    #[test]
+    fn a_cached_layout_still_follows_pages_tree_swaps_and_resizes() {
+        let spec = "col\n  pages bind=tab\n    text id=one text=first\n    text id=two text=second\n";
+        let mut u = Ui::from_spec(spec).unwrap();
+        let f = frame(&mut u, 20, 4);
+        assert!(f.contains("first") && !f.contains("second"), "{f}");
+        let before = u.laid;
+        frame(&mut u, 20, 4);
+        assert_eq!(u.laid, before, "nothing changed, so nothing was laid out again");
+        u.set("tab", 1.0);
+        let f = frame(&mut u, 20, 4);
+        assert!(f.contains("second") && !f.contains("first"), "{f}");
+        u.set("unrelated", 5.0);
+        let g = u.gen;
+        u.set("unrelated", 6.0);
+        assert_eq!(u.gen, g, "a key the layout does not read leaves the layout alone");
+        // a swapped tree and a new size lay out again
+        u.set_tree(parse_spec("col\n  text id=x text=swapped\n").unwrap());
+        let f = frame(&mut u, 20, 4);
+        assert!(f.contains("swapped"), "{f}");
+        frame(&mut u, 30, 6);
+        assert_eq!(u.laid.map(|l| l.0), Some((30, 6)));
     }
 
     #[test]

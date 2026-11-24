@@ -42,9 +42,11 @@ pub enum Dir {
 }
 
 /// Lengths along the main axis (before rounding).
-fn solve(total: i32, sizes: &[Size]) -> Vec<f64> {
+fn solve(total: i32, sizes: &[Size], sc: &mut Scratch) {
+    let Scratch { lens: out, flex, frozen } = sc;
     let total = total.max(0) as f64;
-    let mut out = vec![0.0f64; sizes.len()];
+    out.clear();
+    out.resize(sizes.len(), 0.0);
     let mut left = total;
     // fixed and percentage first, in order; they get cut when there is not enough room
     for (i, s) in sizes.iter().enumerate() {
@@ -57,12 +59,14 @@ fn solve(total: i32, sizes: &[Size]) -> Vec<f64> {
         left -= out[i];
     }
     // the flexible ones: distribute by weight, freeze whoever hits a bound, repeat
-    let flex: Vec<usize> = (0..sizes.len()).filter(|&i| matches!(sizes[i], Size::Fill(_) | Size::Min(_) | Size::Max(_))).collect();
+    flex.clear();
+    flex.extend((0..sizes.len()).filter(|&i| matches!(sizes[i], Size::Fill(_) | Size::Min(_) | Size::Max(_))));
     let weight = |s: Size| match s {
         Size::Fill(w) => w as f64,
         _ => 1.0,
     };
-    let mut frozen = vec![false; sizes.len()];
+    frozen.clear();
+    frozen.resize(sizes.len(), false);
     for _ in 0..=flex.len() {
         let wsum: f64 = flex.iter().filter(|&&i| !frozen[i]).map(|&i| weight(sizes[i])).sum();
         if wsum <= 0.0 {
@@ -90,7 +94,7 @@ fn solve(total: i32, sizes: &[Size]) -> Vec<f64> {
                 frozen[i] = true;
             }
             None => {
-                for &i in &flex {
+                for &i in flex.iter() {
                     if !frozen[i] {
                         out[i] = left.max(0.0) * weight(sizes[i]) / wsum;
                     }
@@ -99,36 +103,48 @@ fn solve(total: i32, sizes: &[Size]) -> Vec<f64> {
             }
         }
     }
-    out
 }
 
 /// Split `area` along `dir`. `gap` cells separate neighbours. Both edges of every rectangle are rounded (never the size),
 /// so neighbours touch exactly and the sizes always add up.
 pub fn split(area: Rect, dir: Dir, sizes: &[Size], gap: i32) -> Vec<Rect> {
+    let mut out = Vec::with_capacity(sizes.len());
+    split_into(&mut out, &mut Scratch::default(), area, dir, sizes, gap);
+    out
+}
+
+/// The buffers `split_into` works in; keep one and every split after the first allocates nothing.
+#[derive(Default)]
+pub struct Scratch {
+    lens: Vec<f64>,
+    flex: Vec<usize>,
+    frozen: Vec<bool>,
+}
+
+/// `split` appending to `out` (it is not cleared), with caller-owned buffers: same rectangles, no allocation once warm.
+pub fn split_into(out: &mut Vec<Rect>, sc: &mut Scratch, area: Rect, dir: Dir, sizes: &[Size], gap: i32) {
     let n = sizes.len() as i32;
     if n == 0 {
-        return Vec::new();
+        return;
     }
     let gap = gap.max(0);
     let main = if dir == Dir::Row { area.w } else { area.h };
     let gaps = (gap * (n - 1)).min(main.max(0));
-    let lens = solve(main - gaps, sizes);
-    let mut rects = Vec::with_capacity(sizes.len());
+    solve(main - gaps, sizes, sc);
     let origin = if dir == Dir::Row { area.x } else { area.y };
     let mut acc = 0.0f64; // sum of lengths before this one
     let gap_eff = if n > 1 { gaps as f64 / (n - 1) as f64 } else { 0.0 };
-    for (i, l) in lens.iter().enumerate() {
+    for (i, l) in sc.lens.iter().enumerate() {
         let start = acc + gap_eff * i as f64;
         let end = start + l;
         let (s, e) = (start.round() as i32, end.round() as i32);
         acc += l;
         let (s, e) = (s.min(main.max(0)), e.min(main.max(0)));
-        rects.push(match dir {
+        out.push(match dir {
             Dir::Row => Rect::new(origin + s, area.y, (e - s).max(0), area.h.max(0)),
             Dir::Col => Rect::new(area.x, origin + s, area.w.max(0), (e - s).max(0)),
         });
     }
-    rects
 }
 
 #[cfg(test)]
@@ -179,6 +195,24 @@ mod tests {
                         assert!(q.w >= 0 && q.h >= 0);
                         assert!(q.w <= w.max(0) && q.h <= h.max(0));
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn split_into_gives_the_same_rectangles_as_split_and_appends() {
+        let mut sc = Scratch::default();
+        let all = [Size::Fixed(7), Size::Min(4), Size::Pct(50), Size::Fill(2), Size::Max(3), Size::Fill(1)];
+        for n in 0..=all.len() {
+            for (w, h, gap) in [(-2, 5, 0), (0, 0, 1), (10, 3, 0), (37, 9, 2), (120, 40, 1), (500, 2, 5)] {
+                for dir in [Dir::Row, Dir::Col] {
+                    let a = Rect::new(3, 4, w, h);
+                    let want = split(a, dir, &all[..n], gap);
+                    let mut got = vec![Rect::new(9, 9, 9, 9)];
+                    split_into(&mut got, &mut sc, a, dir, &all[..n], gap);
+                    assert_eq!(&got[1..], &want[..], "n={n} {w}x{h} gap {gap}");
+                    assert_eq!(got[0], Rect::new(9, 9, 9, 9));
                 }
             }
         }

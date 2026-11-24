@@ -84,10 +84,9 @@ impl El {
     /// `prefix` in front (`.q` becomes `left.q`). Names without the dot stay shared.
     pub fn scope(mut self, prefix: &str) -> El {
         for k in ["id", "bind", "active", "filter", "heatbind"] {
-            if let Some(v) = self.attrs.get_mut(k) {
-                if let Some(rest) = v.strip_prefix('.') {
-                    *v = format!("{prefix}.{rest}");
-                }
+            let scoped = self.attrs.get(k).and_then(|v| v.strip_prefix('.')).map(|rest| format!("{prefix}.{rest}"));
+            if let Some(v) = scoped {
+                self.attrs.insert(k, &v);
             }
         }
         self.children = self.children.into_iter().map(|c| c.scope(prefix)).collect();
