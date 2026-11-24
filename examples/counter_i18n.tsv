@@ -1,0 +1,9 @@
+# translations for counter_i18n.rs: key, then one column per language
+key	en	pl	de
+title	Counter	Licznik	Zaehler
+count#one	{n} click	{n} klik	{n} Klick
+count#few	{n} clicks	{n} kliki	{n} Klicks
+count#many	{n} clicks	{n} klikow	{n} Klicks
+count#other	{n} clicks	{n} klikow	{n} Klicks
+plus	add	dodaj	mehr
+lang	language	jezyk	Sprache
