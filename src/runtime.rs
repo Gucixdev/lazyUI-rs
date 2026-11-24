@@ -101,6 +101,7 @@ pub fn drive<M: Send + 'static>(ui: &mut Ui, opts: Opts, mut handler: impl FnMut
     }
     let mut parser = Parser::new();
     let mut prev: Option<Canvas> = None;
+    let mut spare: Option<Canvas> = None;
     let mut last = Instant::now();
     handler(ui, Incoming::Start, &mut cx);
     let mut buf = [0u8; 4096];
@@ -126,14 +127,14 @@ pub fn drive<M: Send + 'static>(ui: &mut Ui, opts: Opts, mut handler: impl FnMut
             break;
         }
         if ui.dirty || prev.is_none() {
-            let mut c = Canvas::new(w, h, opts.caps);
+            let mut c = Canvas::reuse(spare.take(), w, h, opts.caps);
             ui.render(&mut c);
             out.clear();
             diff(prev.as_ref(), &c, &mut out);
             if !out.is_empty() {
                 term.write_str(&out)?;
             }
-            prev = Some(c);
+            spare = prev.replace(c);
         }
         let timeout = if ui.animating() {
             16

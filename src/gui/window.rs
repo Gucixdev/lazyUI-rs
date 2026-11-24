@@ -50,6 +50,7 @@ struct App<'a, M: Send + 'static, F: FnMut(&mut Ui, Incoming<M>, &mut Cx<M>)> {
     raster: Option<Raster>,
     pixels: Pixels,
     prev: Option<Canvas>,
+    spare: Option<Canvas>,
     cells: (i32, i32),
     mods: Mods,
     cursor: (i32, i32),
@@ -133,10 +134,10 @@ impl<'a, M: Send + 'static, F: FnMut(&mut Ui, Incoming<M>, &mut Cx<M>)> App<'a, 
     fn redraw(&mut self) {
         let (Some(r), Some(p)) = (self.raster.as_mut(), self.present.as_mut()) else { return };
         let t0 = Instant::now();
-        let mut c = Canvas::new(self.cells.0, self.cells.1, Caps::FULL);
+        let mut c = Canvas::reuse(self.spare.take(), self.cells.0, self.cells.1, Caps::FULL);
         self.ui.render(&mut c);
         r.paint(&mut self.pixels, self.prev.as_ref(), &c);
-        self.prev = Some(c);
+        self.spare = self.prev.replace(c);
         p.present(&self.pixels);
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         if let Some(to) = self.tuner.frame(ms) {
@@ -392,6 +393,7 @@ pub fn drive_gui<M: Send + 'static>(ui: &mut Ui, opts: GuiOpts, handler: impl Fn
         raster: None,
         pixels: Pixels::new(1, 1, [0, 0, 0]),
         prev: None,
+        spare: None,
         cells: (1, 1),
         mods: Mods::NONE,
         cursor: (0, 0),

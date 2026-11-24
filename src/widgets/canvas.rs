@@ -196,6 +196,19 @@ impl Canvas {
         let (w, h) = (w.clamp(0, 10_000), h.clamp(0, 10_000));
         Canvas { w, h, caps, cells: vec![BLANK; (w * h) as usize], clip: Rect::new(0, 0, w, h) }
     }
+    /// A blank canvas, built in the buffer of `old` when there is one (a frame that is no longer needed): no allocation
+    /// once the size has settled.
+    pub fn reuse(old: Option<Canvas>, w: i32, h: i32, caps: Caps) -> Canvas {
+        let Some(mut c) = old else { return Canvas::new(w, h, caps) };
+        let (w, h) = (w.clamp(0, 10_000), h.clamp(0, 10_000));
+        c.cells.clear();
+        c.cells.resize((w * h) as usize, BLANK);
+        c.w = w;
+        c.h = h;
+        c.caps = caps;
+        c.clip = Rect::new(0, 0, w, h);
+        c
+    }
     pub fn glyphs(&self) -> Glyphs {
         if self.caps.unicode {
             Glyphs::UNICODE
@@ -552,6 +565,20 @@ mod tests {
         c.text(-5, 9, "zzz", Style::DEFAULT);
         c.fill(Rect::new(-9, -9, 99, 99), '#', Style::DEFAULT);
         assert_eq!(c.to_text(), " ##\n\n");
+    }
+
+    #[test]
+    fn reuse_gives_a_blank_canvas_in_the_old_buffer() {
+        let mut a = Canvas::new(10, 4, Caps::ASCII);
+        a.text(0, 0, "dirty", Style::default());
+        let ptr = a.cells.as_ptr();
+        let b = Canvas::reuse(Some(a), 10, 4, Caps::ASCII);
+        assert_eq!(b.cells.as_ptr(), ptr, "same buffer, no allocation");
+        assert_eq!(b.to_text(), Canvas::new(10, 4, Caps::ASCII).to_text());
+        let c = Canvas::reuse(Some(b), 3, 2, Caps::FULL);
+        assert_eq!((c.w, c.h, c.area()), (3, 2, Rect::new(0, 0, 3, 2)));
+        assert_eq!(c.to_text(), Canvas::new(3, 2, Caps::FULL).to_text());
+        assert_eq!(Canvas::reuse(None, 2, 2, Caps::ASCII).w, 2);
     }
 
     #[test]
