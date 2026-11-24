@@ -35,6 +35,13 @@ margin emits one event `(id, "need", "start,len")` (`index` = start, `number` = 
 with `ui.set_rows(id, start, rows)` (scripts: `rows ID START word...`) and may change the count with `ui.set_list_total(id, n)` (scripts: `total ID N`). Not in the C ABI yet.
 Filtering is the source's job: it sets the new total and the new rows. Selection and `change`/`activate` events use the row number.
 
+## Reorder by drag
+
+`list id=todo items="a,b,c" reorder=1`: press a row, drag, release on another row (the row under the pointer, or the
+first/last when released above/below the list). The list moves the row, the cursor follows, and one event comes out:
+`(id, "move", text=row text, index=from, number=to)`, followed by `dragend` with number 1. Esc cancels. It works for a plain
+list without a filter; a lazy or a filtered list does not reorder and emits no `move` (only `dragend` with number 0). In scripts: `drag X1 Y1 X2 Y2`.
+
 ## Window (feature `gui`, on by default)
 
 `lazyui run SPEC --gui` is the same spec and the same pipes in a window; `lazyui snap SPEC --png out.png` renders the

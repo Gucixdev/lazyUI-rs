@@ -154,6 +154,35 @@ impl List {
         l.asked = Some(n);
         Some(n)
     }
+    /// Row position under screen row `y` of a list drawn in `r`, `None` below the last row. `clamp`: the nearest row instead.
+    pub fn row_at(&self, r: Rect, y: i32, clamp: bool) -> Option<usize> {
+        let n = self.n();
+        if n == 0 {
+            return None;
+        }
+        let pos = self.top as i64 + (y - r.y) as i64;
+        match (pos < 0, pos as usize >= n) {
+            (true, _) => clamp.then_some(0),
+            (_, true) => clamp.then_some(n - 1),
+            _ => Some(pos as usize),
+        }
+    }
+    /// The text of row `pos` (for a lazy list only when it is loaded).
+    pub fn row_text(&self, pos: usize) -> Option<&str> {
+        self.row(pos)
+    }
+    /// Move row `from` to position `to`, the cursor follows. Only for a plain list without a filter: with a filter the
+    /// positions are not the items', with a lazy list the rows are not here. False when nothing moved.
+    pub fn move_row(&mut self, from: usize, to: usize) -> bool {
+        if self.lazy.is_some() || !self.filter.is_empty() || from == to || from >= self.items.len() || to >= self.items.len() {
+            return false;
+        }
+        let it = self.items.remove(from);
+        self.items.insert(to, it);
+        self.refilter();
+        self.cursor = to;
+        true
+    }
     fn n(&self) -> usize {
         self.lazy.as_ref().map_or(self.shown.len(), |l| l.total)
     }

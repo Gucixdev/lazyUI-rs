@@ -1054,6 +1054,9 @@ impl Ui {
                     let payload = self.attr_at(p, "drag").unwrap_or_default();
                     let kind = self.attr_at(p, "dragkind").unwrap_or_else(|| "any".into());
                     self.dnd.press(&p.id(), &payload, &kind, x, y);
+                } else if let Some((id, pos, text)) = self.reorder_source(x, y) {
+                    // a row of a `list reorder=1`: the kind carries which list and which row
+                    self.dnd.press(&id, &text, &format!("reorder:{id}:{pos}"), x, y);
                 }
                 None
             }
@@ -1073,6 +1076,23 @@ impl Ui {
             },
             MouseKind::Up(0) => {
                 let d = self.dnd.release()?;
+                if let Some((id, from)) = Ui::reorder_of(&d.kind) {
+                    let to = self.reorder_target(&id, y);
+                    let moved = match (to, self.states.get_mut(&id)) {
+                        (Some(to), Some(WState::List(l, _))) => l.move_row(from, to).then_some(to),
+                        _ => None,
+                    };
+                    if let Some(to) = moved {
+                        let mut e = UiEvent::new(&id, "move");
+                        e.text = d.payload.clone();
+                        e.index = from as i64;
+                        e.number = to as f64;
+                        self.events.push(e);
+                    }
+                    self.emit(&d.from, "dragend", &d.payload, if moved.is_some() { 1.0 } else { 0.0 });
+                    self.dirty = true;
+                    return Some(true);
+                }
                 let target = self.drop_target(x, y, &d.kind);
                 if let Some((tid, _)) = &target {
                     self.emit(tid, "drop", &d.payload, 0.0);
@@ -1085,9 +1105,40 @@ impl Ui {
         }
     }
 
+    /// `(list id, row, text)` when the pointer is on a row of a list that may be reordered.
+    fn reorder_source(&self, x: i32, y: i32) -> Option<(String, usize, String)> {
+        let p = self.placed.iter().rev().find(|p| p.kind == Kind::List && p.rect.contains(x, y) && self.attr_at(*p, "reorder").is_some())?;
+        let Some(WState::List(l, _)) = self.states.get(p.id()) else { return None };
+        let pos = l.row_at(p.rect, y, false)?;
+        Some((p.id().to_string(), pos, l.row_text(pos)?.to_string()))
+    }
+    fn reorder_of(kind: &str) -> Option<(String, usize)> {
+        let (id, from) = kind.strip_prefix("reorder:")?.rsplit_once(':')?;
+        Some((id.to_string(), from.parse().ok()?))
+    }
+    /// The row a reorder drag would land on when released at screen row `y`: the nearest row of that list.
+    fn reorder_target(&self, id: &str, y: i32) -> Option<usize> {
+        let i = self.placed.index_of(id)?;
+        match self.states.get(id) {
+            Some(WState::List(l, _)) => l.row_at(self.placed.rect(i), y, true),
+            _ => None,
+        }
+    }
+
     /// The target that would take the drop and the payload riding along with the pointer.
     fn draw_drag(&self, c: &mut Canvas) {
         let Some(d) = self.dnd.active() else { return };
+        if let Some((id, _)) = Ui::reorder_of(&d.kind) {
+            if let (Some(i), Some(to)) = (self.placed.index_of(&id), self.reorder_target(&id, d.pos.1)) {
+                if let Some(WState::List(l, _)) = self.states.get(&id) {
+                    let r = self.placed.rect(i);
+                    let y = r.y + to as i32 - l.top as i32;
+                    if let Some(text) = l.row_text(to) {
+                        c.text_fit(r.x, y, r.w, &format!("> {text}"), self.theme.accent_style());
+                    }
+                }
+            }
+        }
         if let Some((_, rect)) = self.drop_target(d.pos.0, d.pos.1, &d.kind) {
             c.border(rect, "", self.theme.accent_style(), self.theme.accent_style());
         }

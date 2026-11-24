@@ -39,6 +39,7 @@ pub fn tree(ui: &mut Ui, w: i32, h: i32) -> String {
 /// type hello        # characters one by one
 /// click 3 4         # left click at column 3 row 4
 /// wheel 3 4 down    # wheel
+/// drag 2 0 2 4      # press at 2,0, move to 2,4, release (drag and drop, list reorder)
 /// paste some text
 /// tick 0.5          # advance the virtual clock
 /// hotkey ctrl-q quit
@@ -103,6 +104,14 @@ pub fn run_script(ui: &mut Ui, script: &str) -> Result<String, String> {
                 relayout_if_needed(ui, w, h);
                 ui.dispatch(&Event::Mouse(MouseKind::Down(0), x, y, Mods::NONE));
                 ui.dispatch(&Event::Mouse(MouseKind::Up(0), x, y, Mods::NONE));
+            }
+            "drag" => {
+                let n: Vec<i32> = args.iter().filter_map(|a| a.parse().ok()).collect();
+                let [x1, y1, x2, y2] = n[..] else { return Err(fail("drag X1 Y1 X2 Y2".into())) };
+                relayout_if_needed(ui, w, h);
+                ui.dispatch(&Event::Mouse(MouseKind::Down(0), x1, y1, Mods::NONE));
+                ui.dispatch(&Event::Mouse(MouseKind::Drag(0), x2, y2, Mods::NONE));
+                ui.dispatch(&Event::Mouse(MouseKind::Up(0), x2, y2, Mods::NONE));
             }
             "wheel" => {
                 let (x, y) = two_ints(&args).ok_or_else(|| fail("wheel X Y up|down".into()))?;
@@ -306,6 +315,18 @@ mod tests {
         let a = run_script(&mut ui, "snap").unwrap();
         let b = run_script(&mut ui, "snap").unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_list_with_reorder_moves_a_row_by_drag() {
+        let mut ui = Ui::from_spec("col\n  list id=l items=\"one,two,three,four\" reorder=1 size=4\n").unwrap();
+        let o = run_script(&mut ui, "size 20 4\ndrag 3 0 3 2\nexpect event l move one\nsnap").unwrap();
+        let at = |w: &str| o.find(w).unwrap_or(usize::MAX);
+        assert!(at("two") < at("three") && at("three") < at("one") && at("one") < at("four"), "{o}");
+        // a drag that ends past the last row lands on the last row; a click alone moves nothing
+        run_script(&mut ui, "size 20 4\ndrag 3 0 3 9\nexpect event l move two").unwrap();
+        assert!(run_script(&mut ui, "size 20 4\nclick 3 1\nexpect event l move").is_err());
+        assert!(run_script(&mut ui, "drag 1 2").is_err());
     }
 
     #[test]
