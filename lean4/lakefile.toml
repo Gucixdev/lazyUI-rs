@@ -1,0 +1,12 @@
+name = "lazyui"
+defaultTargets = ["LazyUi", "oracle"]
+
+[leanOptions]
+autoImplicit = false
+
+[[lean_lib]]
+name = "LazyUi"
+
+[[lean_exe]]
+name = "oracle"
+root = "Oracle"

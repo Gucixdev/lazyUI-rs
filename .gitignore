@@ -2,3 +2,5 @@ target/
 references/*.zip
 references/lazytui/
 web/dist/
+.lake/
+lean-manifest.json

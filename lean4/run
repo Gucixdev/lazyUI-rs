@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# run - check the Lean model of src/layout.rs and hold the Rust code to it.
+#   lean4/run   builds the proofs (lake, core Lean only, no Mathlib), audits their axioms (only propext, Classical.choice
+#               and Quot.sound are allowed; no sorry), then runs examples/layout_grid.rs and the Lean oracle on the same
+#               grid (2379 size lists x widths 0..40 x gaps 0..2 = 292617 cases) and diffs them line by line.
+# Needs elan with leanprover/lean4:v4.36.0 (lake), cargo and bash. Exit 0 when every step passed.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+export PATH="$HOME/.elan/bin:$PATH"
+tmp=$(mktemp -d)
+
+lake build LazyUi oracle
+lake env lean Audit.lean | tee "$tmp/axioms"
+if grep -q sorryAx "$tmp/axioms" || grep -vE "^'.*' (does not depend on any axioms|depends on axioms: \[(propext|Classical.choice|Quot.sound)(, (propext|Classical.choice|Quot.sound))*\])$" "$tmp/axioms" | grep -q .; then
+	echo "axiom audit failed" >&2
+	exit 1
+fi
+
+(cd .. && cargo run -q --example layout_grid) > "$tmp/rust"
+.lake/build/bin/oracle > "$tmp/lean"
+n=$(wc -l < "$tmp/rust")
+if cmp -s "$tmp/rust" "$tmp/lean"; then
+	echo "oracle: $n cases, Rust and Lean agree"
+else
+	echo "oracle: MISMATCH, first differences (< Rust, > Lean):" >&2
+	diff "$tmp/rust" "$tmp/lean" | head -20 >&2
+	exit 1
+fi

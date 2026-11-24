@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# run - hold the Rust layout to the optimum.
+#   ampl/run   for every list of 1..3 fill children (weights 1 or 2) and every width 0..40 with no gap, solves
+#              ampl/layout.mod (highs) for the smallest possible worst edge error and compares it with the worst edge
+#              error of layout::split (examples/layout_grid.rs). Fails when layout.rs is worse than the optimum by more
+#              than 1e-9, and prints how many cases it is exactly optimal in.
+# Needs ampl-run (AMPL Community Edition with highs; ~/.local/bin/ampl-run), python3 and cargo. Exit 0 when it passed.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+tmp=$(mktemp -d)
+(cd .. && cargo run -q --example layout_grid) | grep -E '^[0-9]+ 0 (F[12])( F[12]){0,2} ->' > "$tmp/rust"
+python3 - "$tmp" <<'PY'
+import sys
+from fractions import Fraction as F
+tmp = sys.argv[1]
+cases = []
+for line in open(tmp + '/rust'):
+    head, cells = line.split(' -> ')
+    parts = head.split()
+    w = int(parts[0]); wt = [int(p[1:]) for p in parts[2:]]
+    xs = [tuple(map(int, c.split(':'))) for c in cells.split()]
+    if len(wt) < 2: continue
+    edges = [x + wd for x, wd in xs][:-1]
+    ex = [F(w * sum(wt[:i + 1]), sum(wt)) for i in range(len(wt) - 1)]
+    err = max(abs(F(e) - x) for e, x in zip(edges, ex))
+    cases.append((w, wt, err))
+
+open(tmp + '/cases.txt', 'w').write('\n'.join(f'{w} {" ".join(map(str,wt))} {float(err):.12f}' for w, wt, err in cases))
+PY
+# one ampl session per case: reset, model, data, solve, print
+python3 - "$tmp" <<'PY'
+import sys
+tmp = sys.argv[1]
+mod = open('layout.mod').read()
+out = ['option solver highs;', 'option solver_msg 0;']
+for line in open(tmp + '/cases.txt'):
+    f = line.split(); w = f[0]; wt = f[1:-1]
+    out += ['reset;', mod, 'data;', f'param n := {len(wt)};', f'param T := {w};',
+            'param wt := ' + ' '.join(f'{i+1} {v}' for i, v in enumerate(wt)) + ';', 'solve > /dev/null;',
+            f'printf "%s|%.12f\\n", "{w} {" ".join(wt)}", E;']
+open(tmp + '/all.run', 'w').write('\n'.join(out) + '\n')
+PY
+ampl-run "$tmp/all.run" | grep '|' > "$tmp/opt"
+python3 - "$tmp" <<'PY'
+import sys
+tmp = sys.argv[1]
+rust = {}
+for l in open(tmp + '/cases.txt'):
+    f = l.split(); rust[' '.join(f[:-1])] = float(f[-1])
+worse = exact = 0; n = 0; worst = 0.0
+for l in open(tmp + '/opt'):
+    k, v = l.strip().split('|'); v = float(v); r = rust[k]; n += 1
+    if r > v + 1e-9: worse += 1; worst = max(worst, r - v); print(f'worse than optimum: {k}: rust {r:.4f} optimum {v:.4f}')
+    else: exact += 1
+print(f'ampl: {n} cases, layout.rs optimal in {exact}, worse in {worse}' + (f' (by at most {worst:.4f} cell)' if worse else ''))
+sys.exit(1 if worse or n == 0 else 0)
+PY

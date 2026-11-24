@@ -63,4 +63,11 @@ was left out, is in [`references/`](references/) (one file per project) and [`DE
 - [`docs/WEB-SKINS.md`](docs/WEB-SKINS.md) - the web widgets and their looks
 - [`docs/BINDINGS.md`](docs/BINDINGS.md) - C ABI, Python and other languages; [`DESIGN.md`](DESIGN.md) - the honest list of gaps
 
+## Proofs
+
+`lean4/run` checks a Lean 4 model of the layout (the rounding step is proved: neighbours touch, widths never negative,
+never wider than the area, every edge within half a cell) and diffs `layout::split` against the exact-rational model on
+292617 inputs. `ampl/run` holds the same code to the optimum an AMPL model gives (worst edge error, 492 cases).
+Both exit 0 when they pass; `lean4/` has no Mathlib, only elan.
+
 MIT.
