@@ -288,6 +288,24 @@ impl UiEvent {
     pub(crate) fn new(id: &str, kind: &str) -> UiEvent {
         UiEvent { id: id.into(), kind: kind.into(), text: String::new(), index: -1, number: 0.0 }
     }
+    /// An event made by the program itself (an effect result, a test): `UiEvent::of("loaded", "done", "42")`.
+    pub fn of(id: &str, kind: &str, text: &str) -> UiEvent {
+        let mut e = UiEvent::new(id, kind);
+        e.text = text.into();
+        e
+    }
+    /// Is this the event `(id, kind)`?
+    pub fn is(&self, id: &str, kind: &str) -> bool {
+        self.id == id && self.kind == kind
+    }
+    /// A button or list row was activated (Enter, click) on element `id`.
+    pub fn activated(&self, id: &str) -> bool {
+        self.is(id, "activate")
+    }
+    /// The part of the id after `prefix.`: for events of a component placed with `.scope(prefix)`.
+    pub fn local(&self, prefix: &str) -> Option<&str> {
+        self.id.strip_prefix(prefix)?.strip_prefix('.')
+    }
     pub fn to_json(&self) -> String {
         format!("{{\"id\":{},\"kind\":{},\"text\":{},\"index\":{},\"number\":{}}}", jstr(&self.id), jstr(&self.kind), jstr(&self.text), self.index, jnum(self.number))
     }

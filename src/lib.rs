@@ -1,3 +1,6 @@
+#[cfg(not(target_arch = "wasm32"))]
+pub mod app;
+pub mod build;
 pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;
@@ -6,6 +9,7 @@ pub mod input;
 pub mod layout;
 pub mod lists;
 pub mod native;
+pub mod prelude;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;
 pub mod sys;
