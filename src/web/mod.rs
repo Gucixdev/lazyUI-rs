@@ -12,7 +12,8 @@ use crate::input::{parse_key, Event, Mods, MouseKind};
 use crate::theme::Theme;
 use crate::ui::Ui;
 
-#[cfg(target_arch = "wasm32")]
+// the C ABI: always in the wasm build; natively behind the `web` feature, so Python, Go, C... can load liblazyui.so
+#[cfg(any(target_arch = "wasm32", feature = "web"))]
 mod ffi;
 
 /// u32 words per cell in the frame array.
@@ -139,6 +140,25 @@ impl Web {
         self.ui.set_auto(key, value);
     }
 
+    /// Install a TSV translation catalog (see `i18n`); texts written `@key` are translated from now on. An empty
+    /// catalog text switches translation off. The locale already chosen is kept.
+    pub fn catalog(&mut self, tsv: &str) -> Result<(), String> {
+        if tsv.trim().is_empty() {
+            self.ui.set_catalog(None);
+            return Ok(());
+        }
+        let mut c = crate::i18n::Catalog::from_tsv(tsv)?;
+        if let Some(old) = self.ui.catalog() {
+            c.set_locale(old.locale());
+        }
+        self.ui.set_catalog(Some(c));
+        Ok(())
+    }
+    /// Switch the language; false when no catalog is installed.
+    pub fn locale(&mut self, locale: &str) -> bool {
+        self.ui.set_locale(locale)
+    }
+
     pub fn set_list(&mut self, id: &str, items: &str) {
         self.ui.set_list(id, items.split(',').map(|s| s.to_string()).collect());
     }
@@ -235,6 +255,28 @@ mod tests {
         w.resize(30, 6);
         w.render();
         w
+    }
+
+    #[test]
+    fn catalog_and_locale_translate_a_spec_at_runtime() {
+        let mut w = Web::new("col\n  text text=@hi\n  buttonbar id=b items=\"@go,x\"\n").unwrap();
+        w.resize(20, 4);
+        assert!(!w.locale("pl")); // no catalog yet
+        w.render();
+        assert!(w.frame_text().contains("@hi"));
+        w.catalog("key\ten\tpl\nhi\tHello\tCzesc\ngo\tGo\tIdz\n").unwrap();
+        w.render();
+        assert!(w.frame_text().contains("Hello") && w.frame_text().contains("Go"), "{}", w.frame_text());
+        assert!(w.locale("pl"));
+        w.render();
+        assert!(w.frame_text().contains("Czesc") && w.frame_text().contains("Idz"), "{}", w.frame_text());
+        w.catalog("key\ten\tpl\nhi\tHi\tCze\n").unwrap(); // replaced catalog keeps the chosen language
+        w.render();
+        assert!(w.frame_text().contains("Cze"));
+        assert!(w.catalog("nonsense").is_err());
+        w.catalog("").unwrap();
+        w.render();
+        assert!(w.frame_text().contains("@hi"));
     }
 
     #[test]

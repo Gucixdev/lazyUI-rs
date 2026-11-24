@@ -208,6 +208,34 @@ pub unsafe extern "C" fn lz_act(ip: *const u8, inn: usize, ap: *const u8, an: us
     with(|w| w.act(s(ip, inn), s(ap, an), s(gp, gn)) as i32, 0)
 }
 
+/// Install a TSV translation catalog (empty = translation off). 1 when accepted, else the reason is in `lz_error`.
+///
+/// # Safety
+/// `p`/`n` is readable UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn lz_catalog(p: *const u8, n: usize) -> i32 {
+    with(|w| w.catalog(s(p, n)).map(|_| 1).unwrap_or_else(fail), fail("not initialised".into()))
+}
+
+/// Switch the UI language (`pl`, `pt-BR`...); 0 when there is no catalog.
+///
+/// # Safety
+/// `p`/`n` is a readable locale name.
+#[no_mangle]
+pub unsafe extern "C" fn lz_locale(p: *const u8, n: usize) -> i32 {
+    with(|w| w.locale(s(p, n)) as i32, 0)
+}
+
+/// The settled frame as plain text, into the out buffer (`lz_out_ptr`); returns its length. Call `lz_render` first.
+#[no_mangle]
+pub extern "C" fn lz_snapshot() -> usize {
+    let t = with(|w| w.frame_text(), String::new());
+    OUT.with(|o| {
+        *o.borrow_mut() = t.into_bytes();
+        o.borrow().len()
+    })
+}
+
 #[no_mangle]
 pub extern "C" fn lz_error() -> usize {
     ERR.with(|e| OUT.with(|o| {
