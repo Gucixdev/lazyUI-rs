@@ -1,6 +1,6 @@
 //! `cargo run --release --no-default-features --example bench [ROWS]`: where a frame's time goes with a big tree.
 //! Prints median microseconds per phase over repeated runs, plus the size of the tree.
-use lazyui::canvas::{Caps, Canvas};
+use lazyui::canvas::{self, Caps, Canvas, Style};
 use lazyui::input::{Event, Mods, MouseKind};
 use lazyui::ui::Ui;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -89,5 +89,24 @@ fn main() {
     println!("tick+render     {:>9.1} us", time(30, || {
         u.tick(1.0 / 60.0);
         u.render(&mut c);
+    }));
+    // the cost a frame pays to find out what changed, on a bigger screen with one cell different
+    let (bw, bh) = (240, 70);
+    let (mut a, mut b) = (Canvas::new(bw, bh, Caps::FULL), Canvas::new(bw, bh, Caps::FULL));
+    for y in 0..bh {
+        a.text(0, y, &"the quick brown fox jumps over the lazy dog ".repeat(6), Style::default());
+        b.text(0, y, &"the quick brown fox jumps over the lazy dog ".repeat(6), Style::default());
+    }
+    b.text(100, 30, "X", Style::default());
+    println!("damage {bw}x{bh}, one cell changed   {:>7.1} us  -> {:?}", time(200, || {
+        std::hint::black_box(canvas::damage(Some(&a), &b));
+    }), canvas::damage(Some(&a), &b));
+    let mut out = String::new();
+    println!("diff   {bw}x{bh}, one cell changed   {:>7.1} us", time(200, || {
+        out.clear();
+        canvas::diff(Some(&a), &b, &mut out);
+    }));
+    println!("damage {bw}x{bh}, nothing changed    {:>7.1} us", time(200, || {
+        std::hint::black_box(canvas::damage(Some(&b), &b));
     }));
 }

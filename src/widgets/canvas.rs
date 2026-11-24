@@ -472,6 +472,27 @@ fn sgr(out: &mut String, s: Style, colors: Colors) {
     out.push('m');
 }
 
+/// The smallest rectangle (in cells) that holds every cell where `cur` differs from `prev`: what a window has to upload
+/// or a terminal has to touch. The whole canvas when there is no `prev` or it has another size, `None` when nothing differs.
+pub fn damage(prev: Option<&Canvas>, cur: &Canvas) -> Option<Rect> {
+    let whole = Rect::new(0, 0, cur.w, cur.h);
+    let Some(p) = prev.filter(|p| p.w == cur.w && p.h == cur.h) else { return (!whole.is_empty()).then_some(whole) };
+    let w = cur.w.max(1) as usize;
+    let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0usize, usize::MAX, 0usize);
+    for (y, (a, b)) in p.cells.chunks(w).zip(cur.cells.chunks(w)).enumerate() {
+        if a == b {
+            continue;
+        }
+        let first = a.iter().zip(b).position(|(l, r)| l != r).unwrap_or(0);
+        let last = a.iter().zip(b).rposition(|(l, r)| l != r).unwrap_or(first);
+        x0 = x0.min(first);
+        x1 = x1.max(last);
+        y0 = y0.min(y);
+        y1 = y1.max(y);
+    }
+    (y0 != usize::MAX).then(|| Rect::new(x0 as i32, y0 as i32, (x1 - x0 + 1) as i32, (y1 - y0 + 1) as i32))
+}
+
 /// The shortest escape stream that turns `prev` into `cur`. The cursor is assumed at column 0 of row 0 of the
 /// canvas before and is left there after, so the same stream works on the alternate screen and inline (rows below
 /// the prompt). `prev == None` (or a different size) repaints everything.
@@ -481,6 +502,13 @@ pub fn diff(prev: Option<&Canvas>, cur: &Canvas, out: &mut String) {
     let mut col = -1i32; // unknown until the first move
     let mut last: Option<Style> = None;
     for y in 0..cur.h {
+        // a row that did not change at all is skipped in one comparison (most rows, most frames)
+        if let (false, Some(p)) = (full, prev) {
+            let (a, b) = ((y * cur.w) as usize, ((y + 1) * cur.w) as usize);
+            if p.cells[a..b] == cur.cells[a..b] {
+                continue;
+            }
+        }
         let mut x = 0;
         while x < cur.w {
             let i = (y * cur.w + x) as usize;
@@ -579,6 +607,25 @@ mod tests {
         assert_eq!((c.w, c.h, c.area()), (3, 2, Rect::new(0, 0, 3, 2)));
         assert_eq!(c.to_text(), Canvas::new(3, 2, Caps::FULL).to_text());
         assert_eq!(Canvas::reuse(None, 2, 2, Caps::ASCII).w, 2);
+    }
+
+    #[test]
+    fn damage_is_the_box_around_what_changed() {
+        let a = Canvas::new(10, 5, Caps::ASCII);
+        assert_eq!(damage(Some(&a), &a), None, "identical frames");
+        assert_eq!(damage(None, &a), Some(Rect::new(0, 0, 10, 5)), "no previous frame: everything");
+        let other = Canvas::new(9, 5, Caps::ASCII);
+        assert_eq!(damage(Some(&other), &a), Some(Rect::new(0, 0, 10, 5)), "another size: everything");
+        let mut b = Canvas::new(10, 5, Caps::ASCII);
+        b.text(2, 1, "ab", Style::default());
+        assert_eq!(damage(Some(&a), &b), Some(Rect::new(2, 1, 2, 1)));
+        b.text(7, 3, "z", Style::default());
+        assert_eq!(damage(Some(&a), &b), Some(Rect::new(2, 1, 6, 3)), "two spots: the box around both");
+        // a change of style alone is damage too
+        let mut c = Canvas::new(10, 5, Caps::ASCII);
+        c.fill(Rect::new(4, 4, 1, 1), ' ', Style::fg(crate::canvas::rgb(1, 2, 3)));
+        assert_eq!(damage(Some(&a), &c), Some(Rect::new(4, 4, 1, 1)));
+        assert_eq!(damage(None, &Canvas::new(0, 0, Caps::ASCII)), None);
     }
 
     #[test]

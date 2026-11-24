@@ -96,6 +96,17 @@ Also not in v1 (decided while building, 2026-11-22):
 - **One painter, not a widget trait.** Widgets are concrete types the `ui` module knows; a user-defined widget has to go through
   `Program::view` (elements) rather than drawing into the canvas itself. A `Custom` element that gets `(canvas, rect)` is the likely next step.
 
+## Damage (2026-11-24)
+
+A frame pays only for what changed. `canvas::damage(prev, cur)` is the box of cells that differ (24 us on 240x70, whole canvas
+when there is no previous frame or the size changed, `None` when identical). The window paints only that box
+(`Raster::paint_in`, wide glyphs included), turns it into pixels (`px_rect`, one cell of margin) and hands it to the presenter:
+the CPU path copies only those pixels into the softbuffer and reports them with `present_with_damage`, using the buffer `age` and
+the damage of the last four frames so a double-buffered surface stays right; the GPU path uploads only that sub-rectangle of the
+texture (the first upload after a resize is whole). An identical frame paints and copies nothing. The terminal `diff` skips rows
+that did not change in one comparison (122 -> 37 us on 240x70, one cell changed). Damage is derived from the two canvases, so no
+widget can forget to report it; the cost is one cheap row-wise compare.
+
 ## GUI backend (2026-11-22)
 
 `src/gui/`, next to the terminal backend: `raster` (cells to pixels with fontdue; box lines and blocks are drawn

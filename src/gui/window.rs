@@ -2,6 +2,7 @@
 //! Same contract as the terminal loop: `drive_gui(ui, opts, handler)`; idle costs nothing (`ControlFlow::Wait`).
 
 use super::present::{Cpu, Present};
+use super::raster::PxRect;
 use super::raster::{Pixels, Raster};
 use super::tune::{Path, Render, Tuner};
 use crate::canvas::{Canvas, Caps};
@@ -136,9 +137,15 @@ impl<'a, M: Send + 'static, F: FnMut(&mut Ui, Incoming<M>, &mut Cx<M>)> App<'a, 
         let t0 = Instant::now();
         let mut c = Canvas::reuse(self.spare.take(), self.cells.0, self.cells.1, Caps::FULL);
         self.ui.render(&mut c);
-        r.paint(&mut self.pixels, self.prev.as_ref(), &c);
+        // what changed, as a box of cells: only it is painted, and only its pixels are uploaded (an unchanged frame has none)
+        let cells = crate::canvas::damage(self.prev.as_ref(), &c);
+        if let Some(d) = cells {
+            r.paint_in(&mut self.pixels, self.prev.as_ref(), &c, Some(d));
+        }
+        let none = PxRect { x: 0, y: 0, w: 0, h: 0 };
+        let damage = Some(cells.map_or(none, |d| r.px_rect(d, &self.pixels)));
         self.spare = self.prev.replace(c);
-        p.present(&self.pixels);
+        p.present(&self.pixels, damage);
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         if let Some(to) = self.tuner.frame(ms) {
             let cost = self.tuner.cost();

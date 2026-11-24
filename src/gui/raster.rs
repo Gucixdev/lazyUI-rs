@@ -21,6 +21,32 @@ impl Pixels {
     }
 }
 
+/// A rectangle of pixels (x, y, width, height), what changed since the last frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PxRect {
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+}
+
+impl PxRect {
+    pub fn is_empty(&self) -> bool {
+        self.w == 0 || self.h == 0
+    }
+    pub fn union(self, o: PxRect) -> PxRect {
+        if self.is_empty() {
+            return o;
+        }
+        if o.is_empty() {
+            return self;
+        }
+        let (x, y) = (self.x.min(o.x), self.y.min(o.y));
+        let (r, b) = ((self.x + self.w).max(o.x + o.w), (self.y + self.h).max(o.y + o.h));
+        PxRect { x, y, w: r - x, h: b - y }
+    }
+}
+
 pub struct Raster {
     font: Font,
     px: f32,
@@ -116,13 +142,34 @@ impl Raster {
         (fg, bg)
     }
 
+    /// The pixels a cell rectangle covers, one cell wider on every side (a glyph or a wide character may spill over its
+    /// cell), cut to the picture.
+    pub fn px_rect(&self, cells: crate::canvas::Rect, px: &Pixels) -> PxRect {
+        let (cw, ch) = (self.cw as i32, self.ch as i32);
+        let x0 = ((cells.x - 1).max(0) * cw) as usize;
+        let y0 = ((cells.y - 1).max(0) * ch) as usize;
+        let x1 = (((cells.x + cells.w + 1) * cw) as usize).min(px.w);
+        let y1 = (((cells.y + cells.h + 1) * ch) as usize).min(px.h);
+        PxRect { x: x0.min(px.w), y: y0.min(px.h), w: x1.saturating_sub(x0), h: y1.saturating_sub(y0) }
+    }
+
     /// Repaint into `px` every cell of `cur` that differs from `prev` (all of them when `prev` is None or another size).
     /// Returns how many cells were painted.
     pub fn paint(&mut self, px: &mut Pixels, prev: Option<&Canvas>, cur: &Canvas) -> usize {
+        self.paint_in(px, prev, cur, None)
+    }
+
+    /// `paint`, looking only inside `region` (cells; `crate::canvas::damage` gives the box around every difference). A wide
+    /// glyph whose right half changed is found because the scan starts one column to the left of the region.
+    pub fn paint_in(&mut self, px: &mut Pixels, prev: Option<&Canvas>, cur: &Canvas, region: Option<crate::canvas::Rect>) -> usize {
         let same = matches!(prev, Some(p) if p.w == cur.w && p.h == cur.h);
+        let (x0, x1, y0, y1) = match region.filter(|_| same) {
+            Some(r) => ((r.x - 1).max(0), (r.x + r.w).min(cur.w), r.y.max(0), (r.y + r.h).min(cur.h)),
+            None => (0, cur.w, 0, cur.h),
+        };
         let mut n = 0;
-        for y in 0..cur.h {
-            for x in 0..cur.w {
+        for y in y0..y1 {
+            for x in x0..x1 {
                 let Some(c) = cur.get(x, y) else { continue };
                 if c.ch == '\0' {
                     continue;
@@ -257,6 +304,46 @@ mod tests {
         assert_eq!(r.paint(&mut px, None, &c), 12);
         let lit = px.rgba.chunks_exact(4).filter(|p| p[0] > 128).count();
         assert!(lit > 20, "no glyph ink: {lit}");
+    }
+
+    #[test]
+    fn damage_in_pixels_is_the_cell_box_one_cell_wider_and_cut_to_the_picture() {
+        let Some(r) = raster() else { return };
+        let px = Pixels::new(10 * r.cw, 6 * r.ch, [0, 0, 0]);
+        let a = r.px_rect(Rect::new(4, 2, 2, 1), &px);
+        assert_eq!((a.x, a.y, a.w, a.h), (3 * r.cw, r.ch, 4 * r.cw, 3 * r.ch));
+        let edge = r.px_rect(Rect::new(0, 0, 10, 6), &px);
+        assert_eq!((edge.x, edge.y, edge.w, edge.h), (0, 0, px.w, px.h), "never past the picture");
+        assert_eq!(PxRect { x: 0, y: 0, w: 0, h: 0 }.union(a), a);
+    }
+
+    #[test]
+    fn painting_inside_the_damage_box_gives_the_same_pixels_as_painting_everything() {
+        let Some(mut r) = raster() else { return };
+        let (w, h) = (24, 8);
+        let mut a = Canvas::new(w, h, Caps::FULL);
+        a.text(0, 0, "hello wide 世界 end", Style::default());
+        a.text(2, 5, "below", Style::default());
+        let mut b = Canvas::new(w, h, Caps::FULL);
+        b.text(0, 0, "hello wide 世界 end", Style::default());
+        b.text(2, 5, "below", Style::default());
+        b.text(11, 0, "世", Style::new(crate::canvas::rgb(255, 0, 0), crate::canvas::rgb(0, 0, 80)));
+        b.text(3, 3, "x", Style::new(crate::canvas::rgb(0, 255, 0), crate::canvas::rgb(0, 0, 0)));
+        let (mut full, mut part) = (Pixels::new(w as usize * r.cw, h as usize * r.ch, [0, 0, 0]), Pixels::new(w as usize * r.cw, h as usize * r.ch, [0, 0, 0]));
+        r.paint(&mut full, None, &a);
+        r.paint(&mut part, None, &a);
+        let n_full = r.paint(&mut full, Some(&a), &b);
+        let d = crate::canvas::damage(Some(&a), &b);
+        let n_part = r.paint_in(&mut part, Some(&a), &b, d);
+        assert_eq!(n_full, n_part);
+        assert!(full.rgba == part.rgba, "pixels differ");
+        // the right half of a wide glyph changing alone is still found
+        let mut c = b.clone();
+        c.text(12, 0, "x", Style::default());
+        let n = r.paint_in(&mut part, Some(&b), &c, crate::canvas::damage(Some(&b), &c));
+        let mut again = full;
+        r.paint(&mut again, Some(&b), &c);
+        assert!(n >= 1 && again.rgba == part.rgba, "wide tail change lost");
     }
 
     #[test]
