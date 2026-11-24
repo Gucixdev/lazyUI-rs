@@ -27,6 +27,14 @@ row
 (`widgets/` next to the spec, `./widgets`, `--widgets DIR`). `lazyui widgets ls|show|dirs`. In the browser the page hands
 its widgets over: `mount(canvas, { widgets: { name: text } })`. The format is plain text on purpose: lazytui (C) can read it.
 
+## Lazy lists
+
+`list id=big rows=1000000` is a list whose rows are not in the spec. It keeps only the rows it was handed (at most 4096,
+the farthest dropped first) and shows `...` for the rest. A draw that finds a hole in the window plus one screenful of
+margin emits one event `(id, "need", "start,len")` (`index` = start, `number` = len), once per range; the program answers
+with `ui.set_rows(id, start, rows)` (scripts: `rows ID START word...`) and may change the count with `ui.set_list_total(id, n)` (scripts: `total ID N`). Not in the C ABI yet.
+Filtering is the source's job: it sets the new total and the new rows. Selection and `change`/`activate` events use the row number.
+
 ## Window (feature `gui`, on by default)
 
 `lazyui run SPEC --gui` is the same spec and the same pipes in a window; `lazyui snap SPEC --png out.png` renders the

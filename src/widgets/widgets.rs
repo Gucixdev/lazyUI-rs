@@ -89,9 +89,93 @@ pub struct List {
     pub top: usize,
     filter: String,
     shown: Vec<usize>,
+    lazy: Option<Lazy>,
 }
 
+/// A list whose rows live elsewhere (a file, a database, a socket): it knows how many there are and keeps only the rows it
+/// was handed, the visible window plus a margin. Drawing asks for what is missing through `take_need`.
+#[derive(Clone, Default, Debug)]
+struct Lazy {
+    total: usize,
+    rows: std::collections::BTreeMap<usize, String>,
+    /// the range last asked for (start, len), so a slow source is not asked again on every frame
+    asked: Option<(usize, usize)>,
+    need: Option<(usize, usize)>,
+}
+
+/// Loaded rows beyond this are dropped, farthest from the window first.
+const LAZY_KEEP: usize = 4096;
+
 impl List {
+    /// A list of `total` rows, none loaded yet. The filter does not apply: the source filters and says the new total.
+    pub fn lazy(total: usize) -> List {
+        List { lazy: Some(Lazy { total, ..Default::default() }), ..Default::default() }
+    }
+    pub fn is_lazy(&self) -> bool {
+        self.lazy.is_some()
+    }
+    /// New row count (the source changed). Rows past the end are forgotten, the cursor stays inside.
+    pub fn set_total(&mut self, total: usize) {
+        let l = self.lazy.get_or_insert_with(Lazy::default);
+        l.total = total;
+        l.rows.retain(|&i, _| i < total);
+        l.asked = None;
+        self.cursor = self.cursor.min(total.saturating_sub(1));
+        self.top = self.top.min(self.cursor);
+    }
+    /// Forget every loaded row (the source changed under the same total).
+    pub fn forget_rows(&mut self) {
+        if let Some(l) = &mut self.lazy {
+            l.rows.clear();
+            l.asked = None;
+        }
+    }
+    /// Rows `start..` arrived. Far rows are dropped when the cache grows past its limit.
+    pub fn put_rows(&mut self, start: usize, rows: Vec<String>) {
+        let top = self.top;
+        let Some(l) = &mut self.lazy else { return };
+        for (k, r) in rows.into_iter().enumerate() {
+            if start + k < l.total {
+                l.rows.insert(start + k, r);
+            }
+        }
+        l.asked = None;
+        while l.rows.len() > LAZY_KEEP {
+            let first = *l.rows.keys().next().unwrap();
+            let last = *l.rows.keys().next_back().unwrap();
+            let far = if top.saturating_sub(first) > last.saturating_sub(top) { first } else { last };
+            l.rows.remove(&far);
+        }
+    }
+    /// The range (start, len) the last draw found missing and nobody has been asked for yet. Once per range.
+    pub fn take_need(&mut self) -> Option<(usize, usize)> {
+        let l = self.lazy.as_mut()?;
+        let n = l.need.take()?;
+        l.asked = Some(n);
+        Some(n)
+    }
+    fn n(&self) -> usize {
+        self.lazy.as_ref().map_or(self.shown.len(), |l| l.total)
+    }
+    fn row(&self, pos: usize) -> Option<&str> {
+        match &self.lazy {
+            Some(l) => l.rows.get(&pos).map(String::as_str),
+            None => self.shown.get(pos).map(|&i| self.items[i].as_str()),
+        }
+    }
+    /// Look at the window `top .. top + 2h` (the second screenful is the margin) and note the first hole in it.
+    fn note_need(&mut self, h: usize) {
+        let top = self.top;
+        let Some(l) = &mut self.lazy else { return };
+        let end = l.total.min(top + 2 * h.max(1));
+        let Some(a) = (top..end).find(|i| !l.rows.contains_key(i)) else { return };
+        let b = (a..end).find(|i| l.rows.contains_key(i)).unwrap_or(end);
+        let want = (a, b - a);
+        if l.asked != Some(want) {
+            l.need = Some(want);
+        }
+    }
+
     pub fn new(items: Vec<String>) -> List {
         let mut l = List { items, ..Default::default() };
         l.refilter();
@@ -102,7 +186,7 @@ impl List {
         self.refilter();
     }
     pub fn set_filter(&mut self, f: &str) {
-        if f != self.filter {
+        if self.lazy.is_none() && f != self.filter {
             self.filter = f.to_string();
             self.cursor = 0;
             self.top = 0;
@@ -110,30 +194,43 @@ impl List {
         }
     }
     fn refilter(&mut self) {
+        if self.lazy.is_some() {
+            return;
+        }
         let f = self.filter.to_lowercase();
         self.shown = (0..self.items.len()).filter(|&i| f.is_empty() || self.items[i].to_lowercase().contains(&f)).collect();
         self.cursor = self.cursor.min(self.shown.len().saturating_sub(1));
         self.top = self.top.min(self.cursor);
     }
     pub fn len(&self) -> usize {
-        self.shown.len()
+        self.n()
     }
     pub fn is_empty(&self) -> bool {
-        self.shown.is_empty()
+        self.n() == 0
     }
-    /// Index into `items` of the row under the cursor.
+    /// Index into `items` of the row under the cursor (the row number itself for a lazy list).
     pub fn selected(&self) -> Option<usize> {
-        self.shown.get(self.cursor).copied()
+        match &self.lazy {
+            Some(l) => (self.cursor < l.total).then_some(self.cursor),
+            None => self.shown.get(self.cursor).copied(),
+        }
     }
-    /// The rows that pass the filter, in order.
+    /// The rows that pass the filter, in order (a lazy list: the rows loaded so far).
     pub fn shown_items(&self) -> Vec<&str> {
-        self.shown.iter().map(|&i| self.items[i].as_str()).collect()
+        match &self.lazy {
+            Some(l) => l.rows.values().map(String::as_str).collect(),
+            None => self.shown.iter().map(|&i| self.items[i].as_str()).collect(),
+        }
     }
     pub fn selected_text(&self) -> Option<&str> {
-        self.selected().map(|i| self.items[i].as_str())
+        self.row(self.cursor)
     }
     pub fn select(&mut self, item_index: usize) {
-        if let Some(p) = self.shown.iter().position(|&i| i == item_index) {
+        if let Some(l) = &self.lazy {
+            if item_index < l.total {
+                self.cursor = item_index;
+            }
+        } else if let Some(p) = self.shown.iter().position(|&i| i == item_index) {
             self.cursor = p;
         }
     }
@@ -147,7 +244,8 @@ impl List {
         if self.cursor >= self.top + h {
             self.top = self.cursor + 1 - h;
         }
-        self.top = self.top.min(self.shown.len().saturating_sub(h.min(self.shown.len())));
+        let n = self.n();
+        self.top = self.top.min(n.saturating_sub(h.min(n)));
     }
     pub fn draw(&mut self, c: &mut Canvas, r: Rect, t: &Theme, focused: bool) {
         if r.is_empty() {
@@ -156,23 +254,33 @@ impl List {
         self.keep_visible(r.h as usize);
         let old = c.set_clip(r);
         let g = c.glyphs();
-        let more = self.shown.len() > r.h as usize;
+        self.note_need(r.h as usize);
+        let more = self.n() > r.h as usize;
         let tw = r.w - if more { 1 } else { 0 };
         for row in 0..r.h {
             let pos = self.top + row as usize;
             let y = r.y + row;
-            let Some(&i) = self.shown.get(pos) else { break };
+            if pos >= self.n() {
+                break;
+            }
             let sel = pos == self.cursor;
             let st = if sel { t.selected(focused) } else { t.base() };
             c.fill(Rect::new(r.x, y, tw, 1), ' ', st);
             if sel {
                 c.put(r.x, y, g.pointer, st);
             }
-            c.text_fit(r.x + 2, y, tw - 2, &self.items[i], st);
+            match self.row(pos) {
+                Some(text) => {
+                    c.text_fit(r.x + 2, y, tw - 2, text, st);
+                }
+                None => {
+                    c.text_fit(r.x + 2, y, tw - 2, "...", Style::fg(t.border).on(t.bg));
+                }
+            }
         }
         if more {
             // scrollbar: the thumb is proportional
-            let n = self.shown.len() as f64;
+            let n = self.n() as f64;
             let h = r.h as f64;
             let th = ((h * h / n).round() as i32).clamp(1, r.h);
             let ty = ((self.top as f64 / (n - h).max(1.0)) * (r.h - th) as f64).round() as i32;
@@ -184,7 +292,7 @@ impl List {
         c.set_clip(old);
     }
     pub fn event(&mut self, r: Rect, ev: &Event) -> Res {
-        let n = self.shown.len();
+        let n = self.n();
         let h = r.h.max(1) as usize;
         let before = self.cursor;
         let moved = |me: &mut List, to: usize| -> Res {
@@ -510,6 +618,20 @@ mod tests {
     use super::*;
     use crate::canvas::Caps;
     use crate::input::Mods;
+
+    #[test]
+    fn a_lazy_list_keeps_a_bounded_cache_and_drops_the_far_end() {
+        let mut l = List::lazy(100_000);
+        l.put_rows(0, (0..LAZY_KEEP + 100).map(|i| i.to_string()).collect());
+        assert_eq!(l.shown_items().len(), LAZY_KEEP, "over the limit, rows are dropped");
+        l.top = 0;
+        assert_eq!(l.row(0), Some("0"), "rows near the window stay");
+        assert_eq!(l.row(LAZY_KEEP + 99), None, "the far end went first");
+        l.set_total(10);
+        assert_eq!((l.len(), l.shown_items().len()), (10, 10));
+        l.set_filter("zzz");
+        assert_eq!(l.len(), 10, "a lazy list is filtered by its source, not here");
+    }
 
     fn cv(w: i32, h: i32) -> Canvas {
         Canvas::new(w, h, Caps::ASCII)

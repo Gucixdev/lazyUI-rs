@@ -48,6 +48,7 @@ pub fn tree(ui: &mut Ui, w: i32, h: i32) -> String {
 /// events            # print and clear the event queue as JSON lines
 /// act files select 2   # a semantic action as the DOM skin sends it (focus select activate text toggle sort reset)
 /// describe          # print the skin tree JSON
+/// rows big 0 a b c  # rows of a lazy list (`list rows=N`) arrive; `total big 50` changes the count
 /// expect text "50%"          # frame contains
 /// expect no-text "error"
 /// expect event q change ab   # in the event queue (text optional); consumed
@@ -126,6 +127,18 @@ pub fn run_script(ui: &mut Ui, script: &str) -> Result<String, String> {
             "every" => {
                 let s: f64 = args.first().and_then(|a| a.parse().ok()).ok_or_else(|| fail("every SECONDS EVENT".into()))?;
                 ui.every(s, args.get(1).map(|s| s.as_str()).unwrap_or("tick"));
+            }
+            "rows" => {
+                let usage = || fail("rows ID START ROW... (ROW... = one word each; a lazy list)".into());
+                let id = args.first().ok_or_else(usage)?;
+                let start: usize = args.get(1).and_then(|a| a.parse().ok()).ok_or_else(usage)?;
+                ui.set_rows(id, start, args[2..].to_vec());
+            }
+            "total" => {
+                let usage = || fail("total ID N".into());
+                let id = args.first().ok_or_else(usage)?;
+                let n: usize = args.get(1).and_then(|a| a.parse().ok()).ok_or_else(usage)?;
+                ui.set_list_total(id, n);
             }
             "focus" => {
                 relayout_if_needed(ui, w, h);
@@ -293,6 +306,14 @@ mod tests {
         let a = run_script(&mut ui, "snap").unwrap();
         let b = run_script(&mut ui, "snap").unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn an_agent_can_feed_a_lazy_list_by_script() {
+        let mut ui = Ui::from_spec("col\n  list id=big rows=500 size=3\n").unwrap();
+        let o = run_script(&mut ui, "size 20 3\nsnap\nexpect event big need 0,6\nrows big 0 a b c d e f\nexpect text \"b\"\nexpect no-text \"...\"\ntotal big 2\nsnap").unwrap();
+        assert!(o.contains("..."), "{o}");
+        assert!(run_script(&mut ui, "rows big x").is_err());
     }
 
     #[test]

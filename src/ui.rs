@@ -538,6 +538,23 @@ impl Ui {
         }
         self.dirty = true;
     }
+    /// Rows `start..` of a lazy list (`list rows=N`) arrived, answering a `need` event.
+    pub fn set_rows(&mut self, id: &str, start: usize, rows: Vec<String>) {
+        if let Some(WState::List(l, _)) = self.states.get_mut(id) {
+            l.put_rows(start, rows);
+            self.dirty = true;
+        }
+    }
+    /// The source of a lazy list now has `total` rows.
+    pub fn set_list_total(&mut self, id: &str, total: usize) {
+        match self.states.get_mut(id) {
+            Some(WState::List(l, _)) => l.set_total(total),
+            _ => {
+                self.states.insert(id.to_string(), WState::List(List::lazy(total), String::new()));
+            }
+        }
+        self.dirty = true;
+    }
     pub fn list_selected(&self, id: &str) -> Option<usize> {
         match self.states.get(id) {
             Some(WState::List(l, _)) => l.selected(),
@@ -854,6 +871,29 @@ impl Ui {
                         b.active = active;
                     }
                     b.draw(c, r, &prompt, &t, self.focus.as_deref() == Some(p.id()));
+                }
+            }
+            Kind::List if el.attr("rows").is_some_and(|n| n.parse::<usize>().is_ok()) => {
+                let total: usize = el.attr("rows").and_then(|n| n.parse().ok()).unwrap_or(0);
+                let src = format!("rows={total}");
+                let focused = self.focus.as_deref() == Some(p.id());
+                let st = self.states.entry(p.id().to_string()).or_insert_with(|| WState::List(List::lazy(total), src.clone()));
+                let mut need = None;
+                if let WState::List(l, s) = st {
+                    // the spec's `rows` sets the count until the program sets its own with `set_list_total`
+                    if !l.is_lazy() || *s != src {
+                        l.set_total(total);
+                        *s = src;
+                    }
+                    l.draw(c, r, &t, focused);
+                    need = l.take_need();
+                }
+                if let Some((start, len)) = need {
+                    let mut e = UiEvent::new(p.id(), "need");
+                    e.text = format!("{start},{len}");
+                    e.index = start as i64;
+                    e.number = len as f64;
+                    self.events.push(e);
                 }
             }
             Kind::List => {
@@ -1584,6 +1624,38 @@ col
         assert!(f.contains("swapped"), "{f}");
         frame(&mut u, 30, 6);
         assert_eq!(u.laid.map(|l| l.0), Some((30, 6)));
+    }
+
+    #[test]
+    fn a_lazy_list_asks_only_for_the_rows_in_view_and_scrolls_a_million() {
+        let mut u = Ui::from_spec("col\n  list id=big rows=1000000 size=5\n").unwrap();
+        let f = frame(&mut u, 20, 5);
+        assert!(f.contains("..."), "rows not loaded yet show a placeholder: {f}");
+        let ev = u.take_events();
+        let need: Vec<_> = ev.iter().filter(|e| e.kind == "need").collect();
+        assert_eq!(need.len(), 1, "{ev:?}");
+        assert_eq!((need[0].index, need[0].number), (0, 10.0), "the window and one screenful of margin");
+        // an unanswered range is not asked again on every frame
+        frame(&mut u, 20, 5);
+        assert!(u.take_events().iter().all(|e| e.kind != "need"));
+        u.set_rows("big", 0, (0..10).map(|i| format!("row {i}")).collect());
+        let f = frame(&mut u, 20, 5);
+        assert!(f.contains("row 0") && f.contains("row 4") && !f.contains("..."), "{f}");
+        assert!(u.take_events().iter().all(|e| e.kind != "need"), "the margin is loaded too");
+        // jump to the end: only the end is asked for
+        u.dispatch(&Event::Key(Key::End, Mods::default()));
+        let f = frame(&mut u, 20, 5);
+        assert!(f.contains("..."), "{f}");
+        let need: Vec<_> = u.take_events().into_iter().filter(|e| e.kind == "need").collect();
+        assert_eq!(need.len(), 1);
+        assert!(need[0].index >= 999_990 && need[0].index + need[0].number as i64 <= 1_000_000, "{:?}", need[0]);
+        u.set_rows("big", 999_990, (999_990..1_000_000).map(|i| format!("row {i}")).collect());
+        let f = frame(&mut u, 20, 5);
+        assert!(f.contains("row 999999"), "{f}");
+        assert_eq!(u.list_selected("big"), Some(999_999));
+        // a shorter source: the cursor and the cache follow
+        u.set_list_total("big", 100);
+        assert_eq!(u.list_selected("big"), Some(99));
     }
 
     #[test]
