@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 pub static DEFS: &[Def] = &[
     Def { name: "tree", doc: "folders and leaves from paths: items=\"src/a.rs,src/b.rs,README\" (or from=KEY) open=1; right/left fold, enter activates", focus: true, rows: None, live: 0.0, make: || Box::new(Tree::default()) },
-    Def { name: "dropdown", doc: "pick one of items=\"a,b,c\" (or from=KEY): bind=KEY gets the index, label=; enter/space opens", focus: true, rows: Some(1), live: 0.0, make: || Box::new(Dropdown::default()) },
+    Def { name: "dropdown", doc: "pick one of items=\"a,b,c\" (or from=KEY): bind=KEY gets the index, label=; enter/space opens, a letter jumps to the next item starting with it, wheel and hover move the highlight", focus: true, rows: Some(1), live: 0.0, make: || Box::new(Dropdown::default()) },
     Def { name: "table", doc: "columns=\"a,b\" rows=\"1,2;3,4\" (or from=KEY): up/down, left/right pick a column, s sorts, enter activates", focus: true, rows: None, live: 0.0, make: || Box::new(Table::default()) },
 ];
 
@@ -319,6 +319,13 @@ pub struct Dropdown {
 }
 
 impl Dropdown {
+    /// The next item after `from` (wrapping) that starts with `ch`, ignoring case: type-ahead.
+    fn jump(&self, from: usize, ch: char) -> Option<usize> {
+        let n = self.items.len();
+        let first = |s: &String| s.chars().next().is_some_and(|c| c.to_lowercase().eq(ch.to_lowercase()));
+        (1..=n).map(|k| (from + k) % n).find(|&i| first(&self.items[i]))
+    }
+
     fn pick(&mut self, i: usize, cx: &mut EvCx) -> Res {
         let changed = i != self.sel;
         self.sel = i;
@@ -460,6 +467,25 @@ impl Widget for Dropdown {
                     self.open = false;
                     Res::Ignored
                 }
+                Event::Key(Key::Char(ch), m) if !m.ctrl && !m.alt => {
+                    if let Some(i) = self.jump(self.hi, *ch) {
+                        self.hi = i;
+                    }
+                    Res::Handled
+                }
+                Event::Mouse(MouseKind::Move, x, y, _) if self.popup.contains(*x, *y) => {
+                    let top = (self.hi + 1).saturating_sub(self.popup.h as usize);
+                    self.hi = (top + (*y - self.popup.y) as usize).min(n - 1);
+                    Res::Handled
+                }
+                Event::Mouse(MouseKind::WheelUp, ..) => {
+                    self.hi = self.hi.saturating_sub(1);
+                    Res::Handled
+                }
+                Event::Mouse(MouseKind::WheelDown, ..) => {
+                    self.hi = (self.hi + 1).min(n - 1);
+                    Res::Handled
+                }
                 _ => Res::Handled, // a popup swallows keys so they do not reach hotkeys by accident
             };
         }
@@ -469,6 +495,18 @@ impl Widget for Dropdown {
                 self.hi = self.sel;
                 Res::Handled
             }
+            // closed, a letter selects the next item that starts with it, like an HTML select
+            Event::Key(Key::Char(ch), m) if !m.ctrl && !m.alt => match self.jump(self.sel, *ch) {
+                Some(i) if i != self.sel => {
+                    self.sel = i;
+                    self.hi = i;
+                    let text = self.items[i].clone();
+                    cx.emit("change", &text, i as i64, i as f64);
+                    cx.set_bound(Value::Num(i as f64));
+                    Res::Changed
+                }
+                _ => Res::Ignored,
+            },
             Event::Mouse(MouseKind::Down(0), x, y, _) if r.contains(*x, *y) => {
                 self.open = true;
                 self.hi = self.sel;
@@ -766,6 +804,28 @@ mod tests {
         assert!(rows(&s)[0].contains("blue") && rows(&s)[1] == "below1", "closed again:\n{s}");
         // escape closes without picking; a click on a popup row picks it
         run_script(&mut ui, "key enter\nkey up\nkey esc\nexpect model pick 2\nclick 10 0\nclick 8 2\nexpect model pick 1").unwrap();
+    }
+
+    #[test]
+    fn dropdown_type_ahead_wheel_hover_and_a_long_popup_that_flips_up() {
+        let items = "apple,apricot,banana,blueberry,cherry,date,elder,fig,grape,honeydew";
+        let spec = format!("col\n  text text=top size=1\n  spacer\n  dropdown id=d items=\"{items}\" bind=pick size=1\n");
+        let mut ui = Ui::from_spec(&spec).unwrap();
+        run_script(&mut ui, "size 24 6\nfocus d").unwrap();
+        // closed: a letter selects the next item that starts with it, no popup
+        run_script(&mut ui, "size 24 6\nkey b\nexpect event d change banana\nexpect model pick 2\nkey b\nexpect event d change blueberry\nkey a\nexpect event d change apple").unwrap();
+        // the dropdown is on the last row: the popup opens upwards, 8 rows at most
+        run_script(&mut ui, "size 24 6\nkey enter").unwrap();
+        let s = snapshot(&mut ui, 24, 6);
+        let r = rows(&s);
+        assert!(r[0].contains("apple") && r[4].contains("cherry") && !r[0].contains("top"), "five rows, over the text above the box:\n{s}");
+        assert!(r[5].contains("apple"), "{s}");
+        // open: type-ahead moves the highlight only, the wheel steps it, enter picks it
+        run_script(&mut ui, "size 24 6\nkey g\nwheel 3 5 down\nkey enter\nexpect event d change honeydew\nexpect model pick 9").unwrap();
+        // a click on the top row of the popup picks what is there: the window follows the highlight, so it shows date..honeydew
+        run_script(&mut ui, "size 24 6\nkey enter\nclick 0 0\nexpect event d change date\nexpect model pick 5").unwrap();
+        let s = snapshot(&mut ui, 24, 6);
+        assert!(rows(&s)[0].starts_with("top") && rows(&s)[5].contains("date"), "closed again:\n{s}");
     }
 
     #[test]
