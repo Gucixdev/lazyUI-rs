@@ -5,6 +5,7 @@ pub mod components;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod headless;
+pub mod i18n;
 pub mod input;
 pub mod layout;
 pub mod lists;

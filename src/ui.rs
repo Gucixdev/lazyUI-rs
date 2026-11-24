@@ -355,6 +355,9 @@ struct Placed {
 
 pub struct Ui {
     root: El,
+    /// the tree as the program wrote it, kept only while a catalog translates `root`
+    raw: Option<El>,
+    catalog: Option<crate::i18n::Catalog>,
     widgets: crate::components::Widgets,
     pub theme: Theme,
     model: HashMap<String, Value>,
@@ -375,6 +378,8 @@ impl Ui {
     pub fn new(root: El) -> Ui {
         Ui {
             root,
+            raw: None,
+            catalog: None,
             widgets: crate::components::Widgets::builtin(),
             theme: Theme::green(),
             model: HashMap::new(),
@@ -407,8 +412,31 @@ impl Ui {
     }
     /// Swap the tree (e.g. a new `view` result). State of elements with the same id (list cursor, input text) survives.
     pub fn set_tree(&mut self, root: El) {
-        self.root = root;
+        match &self.catalog {
+            Some(c) => {
+                self.root = c.resolve_tree(&root);
+                self.raw = Some(root);
+            }
+            None => self.root = root,
+        }
         self.dirty = true;
+    }
+    /// Translate every text written as `@key` (see `i18n`) with this catalog, now and in every later tree; `None` turns it off.
+    pub fn set_catalog(&mut self, catalog: Option<crate::i18n::Catalog>) {
+        let base = self.raw.take().unwrap_or_else(|| self.root.clone());
+        self.catalog = catalog;
+        self.set_tree(base);
+    }
+    /// Switch the language of the installed catalog and re-translate the screen. False when there is no catalog.
+    pub fn set_locale(&mut self, locale: &str) -> bool {
+        let Some(c) = self.catalog.as_mut() else { return false };
+        c.set_locale(locale);
+        let base = self.raw.take().unwrap_or_else(|| self.root.clone());
+        self.set_tree(base);
+        true
+    }
+    pub fn catalog(&self) -> Option<&crate::i18n::Catalog> {
+        self.catalog.as_ref()
     }
     /// Re-load a spec keeping model, state and focus; on an error nothing changes.
     pub fn reload_spec(&mut self, src: &str) -> Result<(), String> {

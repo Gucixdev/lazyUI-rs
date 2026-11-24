@@ -29,12 +29,17 @@ pub struct Cx<M> {
     tx: Sender<M>,
     waker: Waker,
     quit: bool,
+    locale: Option<String>,
 }
 
 impl<M: Send + 'static> Cx<M> {
     /// For backends other than the terminal loop: `tx` receives messages, `waker` wakes whoever drains them.
     pub fn new(tx: Sender<M>, waker: Waker) -> Cx<M> {
-        Cx { tx, waker, quit: false }
+        Cx { tx, waker, quit: false, locale: None }
+    }
+    /// Ask for another UI language (needs a catalog: `ui.set_catalog` in `setup`); applied before the next frame.
+    pub fn set_locale(&mut self, locale: &str) {
+        self.locale = Some(locale.to_string());
     }
     pub fn quit_requested(&self) -> bool {
         self.quit
@@ -112,6 +117,9 @@ pub fn drive<M: Send + 'static>(ui: &mut Ui, opts: Opts, mut handler: impl FnMut
                     cx.quit = true;
                 }
                 handler(ui, Incoming::Ui(e), &mut cx);
+                if let Some(l) = cx.locale.take() {
+                    ui.set_locale(&l);
+                }
             }
         }
         if cx.quit || ui.quit || term.terminated() {
@@ -233,7 +241,7 @@ impl<P: Program> Harness<P> {
         // the waker is a dummy: a pipe nobody polls
         let mut fds = [0 as libc::c_int; 2];
         unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) };
-        let mut cx = Cx { tx, waker: Waker::from_fd(fds[1]), quit: false };
+        let mut cx = Cx { tx, waker: Waker::from_fd(fds[1]), quit: false, locale: None };
         program.init(&mut cx);
         let mut hn = Harness { program, ui, rx, cx, size: (w, h), log: Vec::new() };
         hn.pump();
@@ -252,12 +260,18 @@ impl<P: Program> Harness<P> {
                 if let Some(m) = self.program.event(&e) {
                     self.program.update(m, &mut self.cx);
                     self.ui.set_tree(self.program.view());
+                    if let Some(l) = self.cx.locale.take() {
+                        self.ui.set_locale(&l);
+                    }
                 }
             }
             while let Ok(m) = self.rx.try_recv() {
                 any = true;
                 self.program.update(m, &mut self.cx);
                 self.ui.set_tree(self.program.view());
+                if let Some(l) = self.cx.locale.take() {
+                    self.ui.set_locale(&l);
+                }
             }
             if !any {
                 break;

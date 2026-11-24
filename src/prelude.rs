@@ -7,3 +7,4 @@ pub use crate::ui::{col, keybar, panel, progress, row, spacer, text, El, Ui, UiE
 pub use crate::app::{run, test, App, Cx, Sketch};
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::runtime::{Harness, Latest, Program};
+pub use crate::i18n::{tr, trf, trn, Catalog};

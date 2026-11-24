@@ -35,6 +35,8 @@ options:
   --render MODE      gui: auto (default: CPU, GPU when frames measure slow and it helps) | cpu | gpu
   --font FILE.ttf    gui/--png: monospace font (default: DejaVu Sans Mono via fontconfig)
   --font-px N        gui/--png: font size in logical pixels (default 17)
+  --catalog FILE.tsv translations (repeatable, later wins): texts written @key are translated
+  --locale NAME      language of the catalog (pl, de, pt-BR); falls back to en, then to the key
   --widgets DIR      a folder of extra widget files (*.lui), counted as local (repeatable)
   --png FILE         snap: also write the frame as a PNG rendered with the window's rasteriser
 
@@ -72,6 +74,8 @@ struct Args {
     font_px: f32,
     png: Option<String>,
     widget_dirs: Vec<std::path::PathBuf>,
+    catalog: Vec<String>,
+    locale: Option<String>,
 }
 
 fn die(msg: &str) -> ! {
@@ -85,7 +89,7 @@ fn parse_args() -> Args {
         print!("{HELP}");
         exit(0)
     });
-    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None, widget_dirs: vec![] };
+    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None, widget_dirs: vec![], catalog: vec![], locale: None };
     let mut rest: Vec<String> = it.collect();
     rest.reverse();
     while let Some(x) = rest.pop() {
@@ -120,6 +124,8 @@ fn parse_args() -> Args {
             "--font" => a.font = Some(val("--font")),
             "--font-px" => a.font_px = val("--font-px").parse().unwrap_or_else(|_| die("--font-px N")),
             "--png" => a.png = Some(val("--png")),
+            "--catalog" => a.catalog.push(val("--catalog")),
+            "--locale" => a.locale = Some(val("--locale")),
             "--widgets" => a.widget_dirs.push(val("--widgets").into()),
             "-h" | "--help" | "help" => {
                 print!("{HELP}");
@@ -157,6 +163,19 @@ fn load_ui(a: &Args, spec_path: &str) -> Ui {
                 Theme::parse(&txt).unwrap_or_else(|e| die(&format!("{t}: {e}")))
             }
         };
+    }
+    if !a.catalog.is_empty() {
+        let mut cat = lazyui::i18n::Catalog::new();
+        for f in &a.catalog {
+            let txt = std::fs::read_to_string(f).unwrap_or_else(|e| die(&format!("{f}: {e}")));
+            cat.add_tsv(&txt).unwrap_or_else(|e| die(&format!("{f}: {e}")));
+        }
+        if let Some(l) = &a.locale {
+            cat.set_locale(l);
+        }
+        ui.set_catalog(Some(cat));
+    } else if a.locale.is_some() {
+        die("--locale needs --catalog");
     }
     for (k, v) in &a.sets {
         ui.set_auto(k, v);
