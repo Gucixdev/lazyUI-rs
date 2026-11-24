@@ -47,6 +47,7 @@ h.tick(1.0); h.wait_msg();                                // advance the virtual
 ```
 
 From the shell, for a `.lui` spec: `lazyui snap ui.lui --size 60x10`, `lazyui tree ui.lui`, `lazyui script ui.lui test.script`.
+Over HTTP: `lazyui serve ui.lui` prints a token and listens on 127.0.0.1:7878; `curl -H "X-Token: $T" localhost:7878/tree`, `curl -H "X-Token: $T" -d $'focus q\ntype hi' localhost:7878/do` (a script, one command per line). One request at a time, a wrong token or a non-localhost `Host` is refused.
 Always run `cargo test -j2` with `nice` on a busy machine; the default features pull in wgpu (slow to build), use `--no-default-features` while iterating.
 
 ## Gotchas

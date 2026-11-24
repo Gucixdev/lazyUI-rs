@@ -56,4 +56,4 @@ browser. The terminal-only parts (`term`, `runtime`, `session`, `libc`) are not 
 ## Not yet
 
 Kitty keyboard protocol, tree/dropdown/scroll containers, the lazytui bars (ring/zone/pacman), pixel-native widgets
-(smooth progress, rounded rects, proportional fonts), touch/IME input in the web page, `lazyui serve`. See `DESIGN.md` for the honest list.
+(smooth progress, rounded rects, proportional fonts), touch/IME input in the web page. See `DESIGN.md` for the honest list.

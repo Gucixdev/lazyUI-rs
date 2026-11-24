@@ -1,10 +1,11 @@
 # Calling lazyui from other languages
 
-lazyui has three doors, pick the lightest that fits.
+lazyui has four doors, pick the lightest that fits.
 
 | door | for | what you get |
 |---|---|---|
 | the `lazyui` binary | any language that can start a process | spec file in, one JSON line per event out, `KEY=VALUE` lines in to change the model. `lazyui snap / tree / script` for headless checks |
+| `lazyui serve` | agents, scripts, anything with HTTP | the same UI on `127.0.0.1` with a token: `GET /tree /describe /snap /events`, `POST /do` (a script: key, type, click, act, set, tick, expect) |
 | the C ABI (`include/lazyui.h`) | Python, Go, C, C++, Zig, Nim, Lua, anything with an FFI | the whole engine in a shared library, you feed keys and read a frame or text |
 | WebAssembly (`web/lazyui.js`) | JS in a browser or Node | the same C ABI compiled to wasm, painted on a canvas or as DOM |
 
