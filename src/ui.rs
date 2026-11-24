@@ -1102,6 +1102,64 @@ impl Ui {
         s
     }
 
+    /// Press something by what it says, the way a person would click it: `#id` (the element with that id: the button under
+    /// the cursor, the selected row, Enter in an input) or a label / row text (exact match first, then a case-insensitive
+    /// substring). False when nothing matched. Call after a frame was drawn (`headless::snapshot`), like `act`.
+    pub fn press(&mut self, target: &str) -> bool {
+        let t = target.trim();
+        if let Some(id) = t.strip_prefix('#') {
+            let idx = match self.states.get(id) {
+                Some(WState::Buttons(b, _)) => b.cursor,
+                Some(WState::List(l, _)) => l.cursor,
+                _ => 0,
+            };
+            return self.act(id, "activate", &idx.to_string());
+        }
+        let q = t.strip_prefix('~').unwrap_or(t).to_lowercase();
+        let mut part: Option<(String, usize)> = None;
+        let mut hit: Option<(String, usize)> = None;
+        for p in &self.placed {
+            let labels: Vec<String> = match self.states.get(&p.id) {
+                Some(WState::Buttons(b, _)) => b.labels.clone(),
+                Some(WState::List(l, _)) => l.shown_items().into_iter().map(|s| s.to_string()).collect(),
+                _ => continue,
+            };
+            for (i, l) in labels.iter().enumerate() {
+                let l = l.to_lowercase();
+                if l == q && hit.is_none() {
+                    hit = Some((p.id.clone(), i));
+                } else if l.contains(&q) && part.is_none() {
+                    part = Some((p.id.clone(), i));
+                }
+            }
+        }
+        match hit.or(part) {
+            Some((id, i)) => self.act(&id, "activate", &i.to_string()),
+            None => false,
+        }
+    }
+
+    /// Replace the text of an input found by `#id`, by its prompt text, or (empty target) the focused one.
+    /// Emits the same `change` event as typing. False when no input matched.
+    pub fn type_into(&mut self, target: &str, text: &str) -> bool {
+        let t = target.trim();
+        let id = if t.is_empty() {
+            self.focus.clone()
+        } else if let Some(id) = t.strip_prefix('#') {
+            Some(id.to_string())
+        } else {
+            let q = t.strip_prefix('~').unwrap_or(t).to_lowercase();
+            self.placed
+                .iter()
+                .find(|p| p.kind == Kind::Search && Ui::el_at(&self.root, &p.path).and_then(|e| e.attr("prompt")).is_some_and(|pr| pr.to_lowercase().contains(&q)))
+                .map(|p| p.id.clone())
+        };
+        match id {
+            Some(id) if matches!(self.states.get(&id), Some(WState::Input(_))) => self.act(&id, "text", text),
+            _ => false,
+        }
+    }
+
     /// A semantic action from a skin that lays things out itself: `focus`, `select`, `activate`, `text`, `toggle`...
     /// True when the element took it.
     pub fn act(&mut self, id: &str, action: &str, arg: &str) -> bool {

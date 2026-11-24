@@ -221,6 +221,8 @@ pub struct Harness<P: Program> {
     rx: std::sync::mpsc::Receiver<P::Msg>,
     cx: Cx<P::Msg>,
     pub size: (i32, i32),
+    /// Every named UI event the program has been shown so far, oldest first (for agents: "what fired?").
+    pub log: Vec<UiEvent>,
 }
 
 impl<P: Program> Harness<P> {
@@ -233,7 +235,7 @@ impl<P: Program> Harness<P> {
         unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) };
         let mut cx = Cx { tx, waker: Waker::from_fd(fds[1]), quit: false };
         program.init(&mut cx);
-        let mut hn = Harness { program, ui, rx, cx, size: (w, h) };
+        let mut hn = Harness { program, ui, rx, cx, size: (w, h), log: Vec::new() };
         hn.pump();
         hn
     }
@@ -246,6 +248,7 @@ impl<P: Program> Harness<P> {
                 if e.id == "app" && e.kind == "quit" {
                     self.cx.quit = true;
                 }
+                self.log.push(e.clone());
                 if let Some(m) = self.program.event(&e) {
                     self.program.update(m, &mut self.cx);
                     self.ui.set_tree(self.program.view());
@@ -282,5 +285,59 @@ impl<P: Program> Harness<P> {
     }
     pub fn quit_requested(&self) -> bool {
         self.cx.quit
+    }
+
+    // ---- the agent loop: look, act, look again -------------------------------------------------------------
+
+    /// The element tree as one line of JSON (ids, kinds, rects, text, focus, rows, values), after the frame settled.
+    pub fn tree(&mut self) -> String {
+        crate::headless::tree(&mut self.ui, self.size.0, self.size.1)
+    }
+    /// Elements matching `#id`, `~text` or a kind name: `(id, kind, rect)`. Settles the frame first.
+    pub fn find(&mut self, query: &str) -> Vec<(String, &'static str, crate::canvas::Rect)> {
+        let _ = self.frame();
+        self.ui.find(query)
+    }
+    /// Click by meaning: `#id`, or the text of a button or list row. True when something took it.
+    pub fn press(&mut self, target: &str) -> bool {
+        let _ = self.frame();
+        let r = self.ui.press(target);
+        self.pump();
+        r
+    }
+    /// Type into an input: `#id`, its prompt text, or "" for the focused one. Replaces the text, like pasting.
+    pub fn type_into(&mut self, target: &str, text: &str) -> bool {
+        let _ = self.frame();
+        let r = self.ui.type_into(target, text);
+        self.pump();
+        r
+    }
+    /// A key by name (`enter`, `tab`, `ctrl-q`, `a`). False when the name is unknown.
+    pub fn key(&mut self, name: &str) -> bool {
+        let _ = self.frame();
+        match crate::input::parse_key(name) {
+            Some((k, m)) => {
+                self.send(Event::Key(k, m));
+                true
+            }
+            None => false,
+        }
+    }
+    /// `Ok` when the settled frame contains `needle`; else `Err` with the needle and the whole frame, ready to print.
+    pub fn expect_text(&mut self, needle: &str) -> Result<(), String> {
+        let f = self.frame();
+        if f.contains(needle) {
+            Ok(())
+        } else {
+            Err(format!("expected {needle:?} on screen, got:\n{f}"))
+        }
+    }
+    pub fn expect_no_text(&mut self, needle: &str) -> Result<(), String> {
+        let f = self.frame();
+        if f.contains(needle) {
+            Err(format!("did not expect {needle:?} on screen, got:\n{f}"))
+        } else {
+            Ok(())
+        }
     }
 }
