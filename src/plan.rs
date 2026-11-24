@@ -37,6 +37,10 @@ pub struct Plan {
     kind: Vec<Kind>,
     /// `NONE` for the root
     parent: Vec<u32>,
+    /// first child, last child and next sibling, so the children of one element are a walk, not a scan of all
+    first: Vec<u32>,
+    last: Vec<u32>,
+    next: Vec<u32>,
     id_end: Vec<u32>,
     ids: String,
     path_end: Vec<u32>,
@@ -63,6 +67,9 @@ impl Plan {
         self.rect.clear();
         self.kind.clear();
         self.parent.clear();
+        self.first.clear();
+        self.last.clear();
+        self.next.clear();
         self.id_end.clear();
         self.ids.clear();
         self.path_end.clear();
@@ -73,7 +80,18 @@ impl Plan {
     pub fn push(&mut self, kind: Kind, rect: Rect, parent: Option<usize>, path: &[u32], id: Option<&str>) {
         self.rect.push(rect);
         self.kind.push(kind);
+        let me = at(self.rect.len() - 1);
         self.parent.push(parent.map_or(NONE, at));
+        self.first.push(NONE);
+        self.last.push(NONE);
+        self.next.push(NONE);
+        if let Some(p) = parent {
+            match self.last[p] {
+                NONE => self.first[p] = me,
+                prev => self.next[prev as usize] = me,
+            }
+            self.last[p] = me;
+        }
         match id {
             Some(i) if !i.is_empty() => self.ids.push_str(i),
             _ => {
@@ -112,6 +130,18 @@ impl Plan {
     pub fn parent(&self, i: usize) -> Option<usize> {
         let p = self.parent[i];
         (p != NONE).then_some(p as usize)
+    }
+
+    /// Children of `i` in tree order.
+    pub fn children(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
+        let mut c = self.first[i];
+        std::iter::from_fn(move || {
+            (c != NONE).then(|| {
+                let k = c as usize;
+                c = self.next[k];
+                k
+            })
+        })
     }
 
     pub fn get(&self, i: usize) -> Placed<'_> {
@@ -153,6 +183,9 @@ mod tests {
         assert_eq!((p.path(0), p.path(1), p.path(3)), (&[][..], &[0][..], &[1, 0][..]));
         assert_eq!((p.parent(0), p.parent(3)), (None, Some(2)));
         assert_eq!(p.index_of("text@1.0"), Some(3));
+        assert_eq!(p.children(0).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(p.children(2).collect::<Vec<_>>(), [3]);
+        assert_eq!(p.children(3).count(), 0);
         assert_eq!(p.index_of("nope"), None);
         let ids: Vec<_> = p.iter().rev().map(|q| q.id()).collect();
         assert_eq!(ids, ["text@1.0", "row@1", "title", "col@"]);

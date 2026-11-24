@@ -1228,7 +1228,7 @@ impl Ui {
                 }
                 _ => out.push_str("{}"),
             }
-            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed.parent(j) == Some(i)).collect();
+            let kids: Vec<usize> = ui.placed.children(i).collect();
             if !kids.is_empty() {
                 out.push_str(",\"kids\":[");
                 for (n, k) in kids.iter().enumerate() {
@@ -1447,7 +1447,7 @@ impl Ui {
             if let Some(s) = ui.springs.get(p.id()) {
                 out.push_str(&format!(",\"value\":{}", jnum((s.target * 1000.0).round() / 1000.0)));
             }
-            let kids: Vec<usize> = (0..ui.placed.len()).filter(|&j| ui.placed.parent(j) == Some(i)).collect();
+            let kids: Vec<usize> = ui.placed.children(i).collect();
             if !kids.is_empty() {
                 out.push_str(",\"children\":[");
                 for (n, k) in kids.iter().enumerate() {
