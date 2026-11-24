@@ -18,6 +18,7 @@ usage:
   lazyui snap   SPEC [options]     print one settled frame as text
   lazyui tree   SPEC [options]     print the element tree as JSON (ids, rects, state)
   lazyui script SPEC FILE|-        run a script (see below), print what it prints, exit 1 on a failed expect
+  lazyui serve  SPEC [--port N] [--token T]  the UI over HTTP on 127.0.0.1 for agents: GET /tree /snap /describe /events, POST /do (script)
   lazyui select SPEC QUERY         find elements: #id, kind (list) or ~text; prints id kind x y w h
   lazyui themes                    list the built-in themes
   lazyui widgets ls|dirs|show NAME|add SRC [NAME]   shared widgets (see below)
@@ -76,6 +77,8 @@ struct Args {
     widget_dirs: Vec<std::path::PathBuf>,
     catalog: Vec<String>,
     locale: Option<String>,
+    port: u16,
+    token: Option<String>,
 }
 
 fn die(msg: &str) -> ! {
@@ -89,7 +92,7 @@ fn parse_args() -> Args {
         print!("{HELP}");
         exit(0)
     });
-    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None, widget_dirs: vec![], catalog: vec![], locale: None };
+    let mut a = Args { cmd, pos: vec![], size: (80, 24), sets: vec![], theme: None, inline: None, mouse: true, hotkeys: vec![], every: vec![], watch: false, gui: false, render: "auto".into(), font: None, font_px: 17.0, png: None, widget_dirs: vec![], catalog: vec![], locale: None, port: 7878, token: None };
     let mut rest: Vec<String> = it.collect();
     rest.reverse();
     while let Some(x) = rest.pop() {
@@ -126,6 +129,8 @@ fn parse_args() -> Args {
             "--png" => a.png = Some(val("--png")),
             "--catalog" => a.catalog.push(val("--catalog")),
             "--locale" => a.locale = Some(val("--locale")),
+            "--port" => a.port = val("--port").parse().unwrap_or_else(|_| die("--port N")),
+            "--token" => a.token = Some(val("--token")),
             "--widgets" => a.widget_dirs.push(val("--widgets").into()),
             "-h" | "--help" | "help" => {
                 print!("{HELP}");
@@ -261,6 +266,14 @@ fn main() {
             } else {
                 println!("{}", headless::tree(&mut ui, w, h));
             }
+        }
+        "serve" => {
+            let p = a.pos.first().unwrap_or_else(|| die("a SPEC file is needed"));
+            let mut ui = load_ui(&a, p);
+            let token = a.token.clone().or_else(|| std::env::var("LAZYUI_TOKEN").ok()).or_else(lazyui::serve::random_token).unwrap_or_else(|| die("no random source here: pass --token T"));
+            let l = std::net::TcpListener::bind(("127.0.0.1", a.port)).unwrap_or_else(|e| die(&format!("port {}: {e}", a.port)));
+            eprintln!("lazyui: serving {p} on http://127.0.0.1:{}  token: {token}", a.port);
+            lazyui::serve::serve(&mut ui, &l, a.size, &token, None);
         }
         "select" => {
             let (p, q) = match (a.pos.first(), a.pos.get(1)) {

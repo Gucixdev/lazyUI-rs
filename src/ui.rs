@@ -370,6 +370,7 @@ pub struct Ui {
     hotkeys: Vec<(Key, Mods, String)>,
     every: Vec<(f64, f64, String)>,
     clock: f64,
+    dnd: crate::dnd::Dnd,
     pub quit: bool,
     pub dirty: bool,
 }
@@ -392,6 +393,7 @@ impl Ui {
             hotkeys: Vec::new(),
             every: Vec::new(),
             clock: 0.0,
+            dnd: crate::dnd::Dnd::default(),
             quit: false,
             dirty: true,
         }
@@ -713,6 +715,7 @@ impl Ui {
             }
         }
         self.root = root;
+        self.draw_drag(c);
         self.dirty = false;
     }
 
@@ -878,6 +881,13 @@ impl Ui {
                 self.dirty = true;
                 true
             }
+            Event::Key(Key::Esc, _) if self.dnd.active().is_some() => {
+                if let Some(d) = self.dnd.cancel() {
+                    self.emit(&d.from, "dragend", &d.payload, 0.0);
+                }
+                self.dirty = true;
+                true
+            }
             Event::Key(k, m) => {
                 // hotkeys first: with a modifier always, plain characters only when no text field has the focus (F-keys always)
                 let typing = self.focused_kind() == Some(Kind::Search);
@@ -913,6 +923,9 @@ impl Ui {
                 None => false,
             },
             Event::Mouse(kind, x, y, _) => {
+                if let Some(done) = self.dnd_mouse(kind, *x, *y) {
+                    return done;
+                }
                 let hit = self.placed.iter().rev().find(|p| p.kind.focusable() && self.extent_of(p).contains(*x, *y)).map(|p| p.id.clone());
                 match hit {
                     Some(id) => {
@@ -934,6 +947,69 @@ impl Ui {
                 }
             }
         }
+    }
+
+    fn attr_at(&self, p: &Placed, k: &str) -> Option<String> {
+        Ui::el_at(&self.root, &p.path).and_then(|e| e.attr(k)).map(String::from)
+    }
+
+    /// The element under the pointer that takes a drop of `kind`, topmost first.
+    fn drop_target(&self, x: i32, y: i32, kind: &str) -> Option<Placed> {
+        self.placed
+            .iter()
+            .rev()
+            .find(|p| p.rect.contains(x, y) && !p.id.contains('@') && self.attr_at(p, "drop").is_some_and(|a| crate::dnd::accepts(&a, kind)))
+            .cloned()
+    }
+
+    /// Drag and drop on top of the plain mouse handling: `Some(handled)` when the event was part of a drag.
+    fn dnd_mouse(&mut self, kind: &MouseKind, x: i32, y: i32) -> Option<bool> {
+        match kind {
+            MouseKind::Down(0) => {
+                let src = self.placed.iter().rev().find(|p| p.rect.contains(x, y) && !p.id.contains('@') && self.attr_at(p, "drag").is_some()).cloned();
+                if let Some(p) = src {
+                    let payload = self.attr_at(&p, "drag").unwrap_or_default();
+                    let kind = self.attr_at(&p, "dragkind").unwrap_or_else(|| "any".into());
+                    self.dnd.press(&p.id, &payload, &kind, x, y);
+                }
+                None
+            }
+            MouseKind::Drag(0) => match self.dnd.motion(x, y) {
+                crate::dnd::Step::Started => {
+                    if let Some(d) = self.dnd.active().cloned() {
+                        self.emit(&d.from, "dragstart", &d.payload, 0.0);
+                    }
+                    self.dirty = true;
+                    Some(true)
+                }
+                crate::dnd::Step::Moved => {
+                    self.dirty = true;
+                    Some(true)
+                }
+                crate::dnd::Step::None => None,
+            },
+            MouseKind::Up(0) => {
+                let d = self.dnd.release()?;
+                let target = self.drop_target(x, y, &d.kind);
+                if let Some(t) = &target {
+                    self.emit(&t.id, "drop", &d.payload, 0.0);
+                }
+                self.emit(&d.from, "dragend", &d.payload, if target.is_some() { 1.0 } else { 0.0 });
+                self.dirty = true;
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+
+    /// The target that would take the drop and the payload riding along with the pointer.
+    fn draw_drag(&self, c: &mut Canvas) {
+        let Some(d) = self.dnd.active() else { return };
+        if let Some(t) = self.drop_target(d.pos.0, d.pos.1, &d.kind) {
+            c.border(t.rect, "", self.theme.accent_style(), self.theme.accent_style());
+        }
+        let label = format!(" {} ", d.payload);
+        c.text_fit(d.pos.0 + 1, d.pos.1 + 1, (c.w - d.pos.0 - 1).max(0), &label, self.theme.selected(true));
     }
 
     fn extent_of(&self, p: &Placed) -> Rect {
@@ -1441,6 +1517,44 @@ col
         assert!(f.contains("> ta") && f.contains("beta") && !f.contains("alpha") == false || f.contains("beta"));
         assert!(!f.contains("gamma") || f.contains("gamma")); // "gamma" has no "ta"
         assert!(!f.contains("  gamma"));
+    }
+
+    #[test]
+    fn drag_and_drop_moves_a_payload_between_elements() {
+        let spec = "col\n  text id=src text=\"the file\" drag=a.txt dragkind=file size=3\n  text id=bin text=\"bin\" drop=file size=3\n  text id=other text=\"text only\" drop=text size=3\n";
+        let mut u = Ui::from_spec(spec).unwrap();
+        frame(&mut u, 30, 10);
+        // press on the source (rows 0-2), move down onto the bin (rows 3-5)
+        u.dispatch(&Event::Mouse(MouseKind::Down(0), 2, 0, Mods::NONE));
+        u.dispatch(&Event::Mouse(MouseKind::Drag(0), 2, 4, Mods::NONE));
+        let f = frame(&mut u, 30, 10);
+        assert!(f.contains("a.txt"), "the ghost follows the pointer: {f}");
+        u.dispatch(&Event::Mouse(MouseKind::Up(0), 2, 4, Mods::NONE));
+        let evs = u.take_events();
+        assert!(evs.iter().any(|e| e.id == "src" && e.kind == "dragstart" && e.text == "a.txt"), "{evs:?}");
+        assert!(evs.iter().any(|e| e.id == "bin" && e.kind == "drop" && e.text == "a.txt"), "{evs:?}");
+        assert!(evs.iter().any(|e| e.id == "src" && e.kind == "dragend" && e.number == 1.0), "{evs:?}");
+    }
+
+    #[test]
+    fn a_drop_on_a_target_that_does_not_accept_it_or_esc_ends_without_a_drop() {
+        let spec = "col\n  text id=src text=\"the file\" drag=a.txt dragkind=file size=3\n  text id=bin text=\"bin\" drop=file size=3\n  text id=other text=\"text only\" drop=text size=3\n";
+        let mut u = Ui::from_spec(spec).unwrap();
+        frame(&mut u, 30, 10);
+        u.dispatch(&Event::Mouse(MouseKind::Down(0), 2, 0, Mods::NONE));
+        u.dispatch(&Event::Mouse(MouseKind::Drag(0), 2, 7, Mods::NONE));
+        u.dispatch(&Event::Mouse(MouseKind::Up(0), 2, 7, Mods::NONE));
+        let evs = u.take_events();
+        assert!(!evs.iter().any(|e| e.kind == "drop"), "{evs:?}");
+        assert!(evs.iter().any(|e| e.kind == "dragend" && e.number == 0.0));
+        // Esc in the middle of a drag
+        u.dispatch(&Event::Mouse(MouseKind::Down(0), 2, 0, Mods::NONE));
+        u.dispatch(&Event::Mouse(MouseKind::Drag(0), 2, 4, Mods::NONE));
+        u.dispatch(&Event::key(Key::Esc));
+        u.dispatch(&Event::Mouse(MouseKind::Up(0), 2, 4, Mods::NONE));
+        let evs = u.take_events();
+        assert!(!evs.iter().any(|e| e.kind == "drop"), "{evs:?}");
+        assert!(evs.iter().filter(|e| e.kind == "dragend").count() == 1);
     }
 
     #[test]

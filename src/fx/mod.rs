@@ -2,3 +2,4 @@
 pub mod anim;
 pub mod fancy;
 pub mod gfx;
+pub mod motion;
