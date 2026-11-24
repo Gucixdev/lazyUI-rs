@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# build - release binary and C library into target/release (the devframework entry point). 0 arguments.
+# Env: FEATURES=web builds the library only (no window, no wgpu): FEATURES=web ./build
+set -eu
+cd "$(dirname "$(readlink -f "$0")")" || exit 1
+command -v cargo >/dev/null || { echo "build: cargo is missing (install rust)" >&2; exit 1; }
+if [ "${FEATURES:-}" = web ]; then
+	nice -n 10 cargo build -j2 --release -q --no-default-features --features web
+else
+	nice -n 10 cargo build -j2 --release -q
+fi
+echo "built: $(ls target/release | grep -E '^(lazyui|liblazyui\..*)$' | tr '\n' ' ')"

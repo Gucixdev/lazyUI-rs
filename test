@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# test - every unit and integration test, with the window code compiled in. 0 arguments. Exit 0 = all passed.
+set -u
+cd "$(dirname "$(readlink -f "$0")")" || exit 1
+nice -n 10 cargo test -j2 -q 2>&1 | grep -E 'test result|FAILED|panicked|^error' ; exit "${PIPESTATUS[0]}"

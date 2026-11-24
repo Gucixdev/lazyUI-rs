@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# check - everything compiles warning-free in both feature sets, examples and tests included. 0 arguments. Exit 0 = clean.
+set -eu
+cd "$(dirname "$(readlink -f "$0")")" || exit 1
+run() { echo "check: $*"; out=$("$@" 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }; case $out in *warning*) printf '%s\n' "$out" >&2; exit 1 ;; esac; }
+run nice -n 10 cargo check -j2 --all-targets --no-default-features
+run nice -n 10 cargo check -j2 --all-targets
+# clippy is advice for now (38 older findings): the count is shown, not enforced
+if command -v cargo-clippy >/dev/null 2>&1; then echo "check: clippy findings: $(nice -n 10 cargo clippy -j2 --no-default-features 2>&1 | grep -c '^warning\|^error')"; fi
+echo "check: ok"

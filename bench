@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# bench - the engine's own timings against bench.baseline; fails when something got more than 1.5x slower. 0 arguments.
+# Each metric is the best of 3 runs (the minimum is the number least spoiled by a busy machine).
+# Env: SAVE=1 writes the current numbers as the new baseline (do it on purpose, with a clean tree, and say so in the commit).
+#      ROWS=2000 sets the size of the generated tree; TOL=1.5 the allowed slowdown.
+set -eu
+cd "$(dirname "$(readlink -f "$0")")" || exit 1
+ROWS=${ROWS:-2000} TOL=${TOL:-1.5}
+nice -n 10 cargo build -j2 --release -q --no-default-features --example bench
+bin=target/release/examples/bench
+tmp=$(mktemp) && trap 'rm -f "$tmp"' EXIT
+for _ in 1 2 3; do
+	nice -n 10 "$bin" "$ROWS" |
+		awk '{ for (i = 1; i < NF; i++) if ($(i + 1) == "us" && $i ~ /^[0-9.]+$/) {
+			l = ""; for (j = 1; j < i; j++) l = l (l ? " " : "") $j; print l "\t" $i; break } }' >> "$tmp"
+done
+sort -t "$(printf '\t')" -k1,1 -k2,2n "$tmp" | awk -F'\t' '!s[$1]++' > "$tmp.best"
+trap 'rm -f "$tmp" "$tmp.best"' EXIT
+if [ "${SAVE:-}" = 1 ]; then cp "$tmp.best" bench.baseline; echo "bench: baseline saved ($(wc -l < bench.baseline) metrics)"; exit 0; fi
+[ -f bench.baseline ] || { echo "bench: no bench.baseline yet (SAVE=1 ./bench writes it)" >&2; cat "$tmp.best"; exit 1; }
+awk -F'\t' -v tol="$TOL" 'NR == FNR { base[$1] = $2; next }
+	{ b = base[$1]; if (b == "") { printf "new     %-40s %9.1f us\n", $1, $2; next }
+	  r = $2 / b; bad = r > tol; if (bad) fail = 1
+	  printf "%-7s %-40s %9.1f us  (baseline %.1f, x%.2f)\n", bad ? "SLOWER" : "ok", $1, $2, b, r }
+	END { exit fail }' bench.baseline "$tmp.best"

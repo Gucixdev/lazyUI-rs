@@ -1,0 +1,10 @@
+click (hit)	36.5
+cold frame	489.8
+damage 240x70, nothing changed	24.2
+damage 240x70, one cell changed	24.6
+diff 240x70, one cell changed	37.5
+find #id (last)	47.2
+relayout cached	4.3
+relayout cold	431.3
+render	55.8
+tick+render	66.2
