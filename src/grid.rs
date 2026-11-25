@@ -261,3 +261,47 @@ mod timing {
         println!("first frame {first:?}, 100 scrolled frames {:?}", t.elapsed());
     }
 }
+
+#[cfg(test)]
+mod timing_lists {
+    use crate::canvas::{Caps, Canvas};
+    use crate::ui::Ui;
+    use std::time::Instant;
+
+    /// 100k rows in a `list` and in a `table` (rows from a model text): first frame and 100 frames moving the cursor.
+    /// `cargo test --release grid::timing_lists -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_frame_of_100k_rows() {
+        let names: Vec<String> = (0..100_000).map(|i| format!("file-{i}.jpg")).collect();
+        let mut ui = Ui::from_spec("col\n  list id=l size=fill\n").unwrap();
+        let t = Instant::now();
+        ui.set_list("l", names.clone());
+        let set = t.elapsed();
+        let mut c = Canvas::new(120, 50, Caps::FULL);
+        let t = Instant::now();
+        ui.render(&mut c);
+        let first = t.elapsed();
+        ui.focus("l");
+        let t = Instant::now();
+        for _ in 0..100 {
+            ui.dispatch(&crate::input::Event::Key(crate::input::Key::PageDown, crate::input::Mods::NONE));
+            ui.render(&mut c);
+        }
+        println!("list: set {set:?}, first frame {first:?}, 100 pgdn frames {:?}", t.elapsed());
+
+        let rows: String = (0..100_000).map(|i| format!("file-{i}.jpg,{}", i * 7)).collect::<Vec<_>>().join(";");
+        let mut ui = Ui::from_spec("col\n  table id=t columns=\"name,size\" from=rows size=fill\n").unwrap();
+        ui.set_text("rows", &rows);
+        let t = Instant::now();
+        ui.render(&mut c);
+        let first = t.elapsed();
+        ui.focus("t");
+        let t = Instant::now();
+        for _ in 0..100 {
+            ui.dispatch(&crate::input::Event::Key(crate::input::Key::PageDown, crate::input::Mods::NONE));
+            ui.render(&mut c);
+        }
+        println!("table: first frame {first:?}, 100 pgdn frames {:?}", t.elapsed());
+    }
+}

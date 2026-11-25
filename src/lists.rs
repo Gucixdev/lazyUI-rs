@@ -521,7 +521,9 @@ impl Widget for Dropdown {
 
 #[derive(Default)]
 pub struct Table {
-    src: String,
+    src: (String, String),
+    /// the widest cell of each column (the header counts), kept from the last parse
+    natural: Vec<i32>,
     cols: Vec<String>,
     rows: Vec<Vec<String>>,
     numeric: Vec<bool>,
@@ -539,15 +541,16 @@ impl Table {
             Some(t) => t,
             None => cx.text_attr("rows", ""),
         };
-        let src = format!("{}|{}", cols.join(","), raw);
-        if src == self.src {
+        let joined = cols.join(",");
+        if self.src.0 == joined && self.src.1 == raw {
             return;
         }
-        self.src = src;
+        self.src = (joined, raw.clone());
         self.rows = raw.split(';').filter(|r| !r.trim().is_empty()).map(|r| r.split(',').map(|c| c.trim().to_string()).collect()).collect();
         let n = cols.len().max(self.rows.iter().map(|r| r.len()).max().unwrap_or(0));
         self.cols = (0..n).map(|i| cols.get(i).cloned().unwrap_or_default()).collect();
         self.numeric = (0..n).map(|c| !self.rows.is_empty() && self.rows.iter().all(|r| r.get(c).map_or(true, |s| s.is_empty() || s.parse::<f64>().is_ok()))).collect();
+        self.natural = (0..n).map(|c| self.rows.iter().map(|r| r.get(c).map_or(0, |s| str_width(s)) as i32).chain([str_width(&self.cols[c]) as i32 + 1]).max().unwrap_or(1)).collect();
         self.col = self.col.min(n.saturating_sub(1));
         self.resort();
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
@@ -571,9 +574,7 @@ impl Table {
     }
 
     fn widths(&self, total: i32) -> Vec<i32> {
-        let mut w: Vec<i32> = (0..self.cols.len())
-            .map(|c| self.rows.iter().map(|r| r.get(c).map_or(0, |s| str_width(s)) as i32).chain([str_width(&self.cols[c]) as i32 + 1]).max().unwrap_or(1))
-            .collect();
+        let mut w = self.natural.clone();
         let gaps = (w.len() as i32 - 1).max(0);
         while w.iter().sum::<i32>() + gaps > total {
             let (i, m) = w.iter().enumerate().max_by_key(|(_, v)| **v).map(|(i, v)| (i, *v)).unwrap_or((0, 0));
