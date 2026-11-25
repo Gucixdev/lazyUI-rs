@@ -972,7 +972,11 @@ impl Ui {
                 }
             }
             Kind::Buttons => {
-                let items = split_items(el.attr("items").unwrap_or(""));
+                let items = match el.attr("items").and_then(|v| v.strip_prefix('@')) {
+                    // `items=@KEY`: one label per line of the model text, so the program can change them
+                    Some(k) => self.text_of(k).lines().filter(|l| !l.is_empty()).map(str::to_string).collect(),
+                    None => split_items(el.attr("items").unwrap_or("")),
+                };
                 let active = el.attr("active").map(|k| self.number(k).max(0.0) as usize);
                 let prompt = el.attr("prompt").unwrap_or("").to_string();
                 let src = items.join("\u{1}");
@@ -2095,6 +2099,18 @@ col
         let s = snapshot(&mut ui, 60, 8);
         assert!(s.lines().filter(|l| l.contains("word")).count() >= 3, "wrapped over several rows:\n{s}");
         assert!(s.lines().all(|l| l.trim_end().len() <= 45), "never wider than ~40 cells:\n{s}");
+    }
+
+    #[test]
+    fn button_labels_can_follow_the_model() {
+        use crate::headless::snapshot;
+        let mut ui = Ui::from_spec("col\n  buttonbar id=tabs items=@names active=tab size=1\n").unwrap();
+        ui.set_text("names", "docs\nmy, tab");
+        let s = snapshot(&mut ui, 30, 2);
+        assert!(s.contains("docs") && s.contains("my, tab"), "{s}");
+        ui.set_text("names", "only");
+        let s = snapshot(&mut ui, 30, 2);
+        assert!(s.contains("only") && !s.contains("docs"), "{s}");
     }
 
     #[test]

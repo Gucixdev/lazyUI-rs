@@ -94,3 +94,5 @@ a failure names the line. `tests/pty_run.py` drives the real binary in a pseudo-
 `canvas` cell grid + diff + colour/ASCII fallback, `layout` fixed/pct/fill/min/max solver, `anim` RK4 springs,
 `theme` data themes, `input` byte decoder (utf-8, CSI, SGR mouse, paste), `widgets`, `ui` tree + spec + model + focus,
 `headless`, `term` raw mode via libc, `runtime` the loop.
+
+Button labels from the model: `buttonbar id=tabs items=@names active=tab` takes one label per line of the model text `names` (`ui.set_text("names", "a\nb")`), so a program can add and remove tabs; with `size=@h:0` the bar can be hidden until there is more than one.

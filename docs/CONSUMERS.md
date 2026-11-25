@@ -16,7 +16,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | fm8-ui | lazyUI |
 |---|---|
 | `virt` (virtual list/grid) | has: `grid` (virtual tiles with pictures and labels, `need` events for the tiles about to show; 100k tiles: first frame 0.18 ms, scrolled frames 0.18 ms each in release, `cargo test --release grid::timing -- --ignored --nocapture`; pictures and disk not included); `list` with 100k rows: set 5.3 ms, 100 page-down frames 7.5 ms; `table` with 100k rows: first frame 35 ms, 100 frames 23 ms (release, `cargo test --release grid::timing_lists -- --ignored --nocapture`); real icons not included |
-| `tabs` | has: `pages` |
+| `tabs` | has: `buttonbar` + `pages`; labels can follow the model (`items=@KEY`); `fm8-lz` has folder tabs (ctrl-t, ctrl-w, ctrl-tab) |
 | `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); `menubar` (titles, drop-downs, one level of sub-menus, keys and mouse, `activate` carries `File/Recent/a`) |
 | `tooltip` | has: `tip="text"` on any element (half a second of rest, `\n` breaks lines, long text wraps at 40 cells) |
