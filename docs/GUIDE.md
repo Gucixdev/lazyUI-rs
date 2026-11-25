@@ -46,6 +46,8 @@ Dragging to and from other programs (native window only): a `drag=` source whose
 
 Hooks: `hook=NAME` on an element sends every event it raises to a running finedesktop as `emit NAME KIND ID TEXT` (a script in `hooks/on-user` or a subscriber sees it); nothing is sent without the attribute or without a desktop. Only the native window and panel loop do it (`gui::panel::run`).
 
+Menu bar: `menubar menus="File=Open,-,Recent>a|b,~Quit;Edit=Copy"` (`;` between menus, `=` after the title, `,` between entries, `>` opens a sub-menu whose entries split on `|`, `-` separator, `~` greyed). A pick emits `activate` with the path `File/Recent/a`.
+
 Tooltip: `tip="text"` on any element; it appears next to the pointer after it rests on the element for half a second, and goes when the pointer leaves or a button is pressed.
 
 ## As a library
