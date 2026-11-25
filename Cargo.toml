@@ -42,3 +42,7 @@ lto = true
 [[example]]
 name = "panel"
 required-features = ["gui"]
+
+[[example]]
+name = "window"
+required-features = ["gui"]

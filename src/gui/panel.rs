@@ -1,4 +1,4 @@
-//! A `Ui` drawn into a layer-shell panel (`crate::wl::panel`): cells to pixels with the same rasteriser as the window,
+//! A `Ui` drawn into a layer-shell panel (`crate::wl::panel`) or an xdg window (`crate::wl::window`): cells to pixels with the same rasteriser as the window,
 //! pixels to 0xAARRGGBB for the shared-memory buffer.
 use super::raster::{Pixels, Raster};
 use crate::canvas::{Caps, Canvas, Color};
@@ -6,7 +6,8 @@ use crate::widgets::theme::Theme;
 use crate::ui::Ui;
 use crate::fdctl;
 use crate::ui::UiEvent;
-use crate::wl::panel::{Panel, State};
+use crate::wl::panel::State;
+use crate::wl::Surface;
 use crate::wl::seat::Seat;
 use crate::wl::wire::Conn;
 use std::os::fd::RawFd;
@@ -43,9 +44,10 @@ pub fn theme_of(e: &crate::fdctl::Event) -> Option<&str> {
     (e.kind == "theme" && !e.rest.is_empty()).then_some(e.rest.as_str())
 }
 
-/// Draw `ui` once into an open panel.
-pub fn show(p: &mut Panel, conn: &mut Conn, ui: &mut Ui, r: &mut Raster) -> std::io::Result<()> {
-    let f = frame(ui, r, p.width as usize, p.height as usize);
+/// Draw `ui` once into an open panel or window.
+pub fn show(p: &mut impl Surface, conn: &mut Conn, ui: &mut Ui, r: &mut Raster) -> std::io::Result<()> {
+    let (w, h) = p.size();
+    let f = frame(ui, r, w as usize, h as usize);
     p.draw(conn, &f)
 }
 
@@ -86,10 +88,10 @@ impl Follow {
     }
 }
 
-/// The panel's event loop: Wayland messages and finedesktop theme events in, pointer events into the `Ui`, a frame out
+/// The event loop of a panel or window: Wayland messages and finedesktop theme events in, pointer events into the `Ui`, a frame out
 /// whenever the `Ui` is dirty. Sleeps in `poll` until a message, a timer or an animation frame; returns when the
 /// compositor closes the panel or the `Ui` quits (the events of the batch that held the close are still delivered). `on` gets the events the `Ui` raises (clicks on buttons and so on).
-pub fn run(conn: &mut Conn, p: &mut Panel, seat: &mut Seat, ui: &mut Ui, r: &mut Raster, follow: Option<&Follow>, on: &mut dyn FnMut(&mut Ui, UiEvent)) -> std::io::Result<()> {
+pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, r: &mut Raster, follow: Option<&Follow>, on: &mut dyn FnMut(&mut Ui, UiEvent)) -> std::io::Result<()> {
     let mut last = Instant::now();
     let mut closed = false;
     loop {
@@ -163,6 +165,7 @@ pub fn run(conn: &mut Conn, p: &mut Panel, seat: &mut Seat, ui: &mut Ui, r: &mut
 
 #[cfg(test)]
 mod tests {
+    use crate::wl::panel::Panel;
     use super::*;
 
     #[test]
@@ -237,5 +240,37 @@ mod tests {
         run(&mut conn, &mut p, &mut seat, &mut ui, &mut r, None, &mut |_, e| got.push((e.id.clone(), e.kind.clone()))).unwrap();
         let _w = t.join().unwrap();
         assert!(got.contains(&("b".to_string(), "activate".to_string())), "{got:?}");
+    }
+
+    #[test]
+    fn a_window_answers_the_ping_and_the_loop_ends_on_the_close_request() {
+        use crate::wl::wire::{encode, Arg};
+        use crate::wl::window::Window;
+        use crate::wl::Global;
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+        let Ok(mut r) = Raster::system(14.0, None) else { return };
+        let (a, b) = UnixStream::pair().unwrap();
+        let (mut conn, mut server) = (Conn::from_stream(a), Conn::from_stream(b.try_clone().unwrap()));
+        let g = vec![Global { name: 7, interface: "wl_seat".into(), version: 9 }];
+        let mut seat = Seat::bind(&mut conn, 1, &g, r.cw, r.ch).unwrap();
+        let mut w = Window::fake((r.cw as u32 * 10, r.ch as u32));
+        let t = std::thread::spawn(move || {
+            let mut out = b;
+            out.write_all(&encode(3, 0, &[Arg::U32(77)])).unwrap();
+            out.write_all(&encode(8, 1, &[])).unwrap();
+            let mut pong = None;
+            while pong.is_none() {
+                let m = server.read().unwrap();
+                if (m.obj, m.opcode) == (3, 3) {
+                    pong = Some(m.reader().u32().unwrap());
+                }
+            }
+            (pong, out)
+        });
+        let mut ui = Ui::new(crate::prelude::text("x"));
+        run(&mut conn, &mut w, &mut seat, &mut ui, &mut r, None, &mut |_, _| {}).unwrap();
+        let (pong, _out) = t.join().unwrap();
+        assert_eq!(pong, Some(77));
     }
 }

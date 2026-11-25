@@ -1,9 +1,9 @@
 //! A layer-shell panel: a surface the compositor places at a screen edge (bar, launcher, overlay), pixels through
 //! shared memory. Protocols: wl_compositor, wl_shm, zwlr_layer_shell_v1 (wlr-layer-shell-unstable-v1).
+use super::shm::Frame;
 use super::wire::{Arg, Conn, Msg};
-use super::{find, Global};
+use super::{bind, find, Global};
 use std::io::{Error, Result};
-use std::os::fd::{FromRawFd, OwnedFd};
 
 pub const LAYER_BACKGROUND: u32 = 0;
 pub const LAYER_BOTTOM: u32 = 1;
@@ -17,8 +17,6 @@ pub const ANCHOR_RIGHT: u32 = 8;
 pub const KEYBOARD_NONE: u32 = 0;
 pub const KEYBOARD_EXCLUSIVE: u32 = 1;
 pub const KEYBOARD_ON_DEMAND: u32 = 2;
-
-const FORMAT_ARGB8888: u32 = 0;
 
 /// What a message did to the panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,19 +42,7 @@ pub struct Spec {
 pub struct Panel {
     surface: u32,
     layer_surface: u32,
-    shm: u32,
-    pub width: u32,
-    pub height: u32,
-    map: Option<(*mut u8, usize)>,
-    pool: u32,
-    buffer: u32,
-    _fd: Option<OwnedFd>,
-}
-
-fn bind(c: &mut Conn, registry: u32, g: &Global, version: u32) -> Result<u32> {
-    let id = c.new_id();
-    c.send(registry, 0, &[Arg::U32(g.name), Arg::Str(&g.interface), Arg::U32(version.min(g.version)), Arg::New(id)], &[])?;
-    Ok(id)
+    frame: Frame,
 }
 
 impl Panel {
@@ -92,51 +78,24 @@ impl Panel {
                 let mut r = m.reader();
                 let (serial, w, h) = (r.u32()?, r.u32()?, r.u32()?);
                 c.send(layer_surface, 6, &[Arg::U32(serial)], &[])?;
-                return Ok(Panel { surface, layer_surface, shm, width: if w > 0 { w } else { spec.size.0 }, height: if h > 0 { h } else { spec.size.1 }, map: None, pool: 0, buffer: 0, _fd: None });
+                return Ok(Panel { surface, layer_surface, frame: Frame::new(surface, shm, if w > 0 { w } else { spec.size.0 }, if h > 0 { h } else { spec.size.1 }) });
             }
         }
     }
 
     /// A panel with no surface behind it, for tests of code that drives one over a fake connection.
-    #[cfg(all(test, feature = "gui"))]
+    #[cfg(test)]
     pub(crate) fn fake(layer_surface: u32, width: u32, height: u32) -> Panel {
-        Panel { surface: 6, layer_surface, shm: 4, width, height, map: None, pool: 0, buffer: 0, _fd: None }
+        Panel { surface: 6, layer_surface, frame: Frame::new(6, 4, width, height) }
     }
 
-    /// Put one frame on screen: `argb` is `width * height` pixels, 0xAARRGGBB. Makes the shared-memory pool on the
-    /// first call; the buffer is reused, so call again only after the compositor released it (or for a single frame).
+    pub fn size(&self) -> (u32, u32) {
+        (self.frame.width, self.frame.height)
+    }
+
+    /// Put one frame on screen: `argb` is `width * height` pixels, 0xAARRGGBB.
     pub fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> Result<()> {
-        let (w, h) = (self.width as usize, self.height as usize);
-        if argb.len() != w * h {
-            return Err(Error::other(format!("frame has {} pixels, the panel needs {}", argb.len(), w * h)));
-        }
-        let bytes = w * h * 4;
-        if self.map.is_none() {
-            let fd = unsafe { libc::memfd_create(c"lazyui-panel".as_ptr(), libc::MFD_CLOEXEC) };
-            if fd < 0 {
-                return Err(Error::last_os_error());
-            }
-            let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-            use std::os::fd::AsRawFd;
-            if unsafe { libc::ftruncate(fd.as_raw_fd(), bytes as i64) } != 0 {
-                return Err(Error::last_os_error());
-            }
-            let p = unsafe { libc::mmap(std::ptr::null_mut(), bytes, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd.as_raw_fd(), 0) };
-            if p == libc::MAP_FAILED {
-                return Err(Error::last_os_error());
-            }
-            self.pool = c.new_id();
-            c.send(self.shm, 0, &[Arg::New(self.pool), Arg::Fd, Arg::I32(bytes as i32)], &[fd.as_raw_fd()])?;
-            self.buffer = c.new_id();
-            c.send(self.pool, 0, &[Arg::New(self.buffer), Arg::I32(0), Arg::I32(w as i32), Arg::I32(h as i32), Arg::I32(w as i32 * 4), Arg::U32(FORMAT_ARGB8888)], &[])?;
-            self.map = Some((p as *mut u8, bytes));
-            self._fd = Some(fd);
-        }
-        let (p, len) = self.map.unwrap();
-        unsafe { std::ptr::copy_nonoverlapping(argb.as_ptr() as *const u8, p, len) };
-        c.send(self.surface, 1, &[Arg::Obj(self.buffer), Arg::I32(0), Arg::I32(0)], &[])?;
-        c.send(self.surface, 9, &[Arg::I32(0), Arg::I32(0), Arg::I32(w as i32), Arg::I32(h as i32)], &[])?;
-        c.send(self.surface, 6, &[], &[])
+        self.frame.draw(c, argb)
     }
 
     /// React to a message of the layer surface: a new size (the buffer is dropped, the next `draw` makes one that
@@ -155,14 +114,9 @@ impl Panel {
                 let mut r = m.reader();
                 let (serial, w, h) = (r.u32()?, r.u32()?, r.u32()?);
                 c.send(self.layer_surface, 6, &[Arg::U32(serial)], &[])?;
-                if (w > 0 && w != self.width) || (h > 0 && h != self.height) {
-                    if w > 0 {
-                        self.width = w;
-                    }
-                    if h > 0 {
-                        self.height = h;
-                    }
-                    self.drop_buffer(c)?;
+                let (cw, ch) = self.size();
+                if (w > 0 && w != cw) || (h > 0 && h != ch) {
+                    self.frame.resize(c, if w > 0 { w } else { cw }, if h > 0 { h } else { ch })?;
                     return Ok(State::Resized);
                 }
                 Ok(State::Open)
@@ -172,32 +126,10 @@ impl Panel {
         }
     }
 
-    fn drop_buffer(&mut self, c: &mut Conn) -> Result<()> {
-        if let Some((p, len)) = self.map.take() {
-            c.send(self.buffer, 0, &[], &[])?;
-            c.send(self.pool, 1, &[], &[])?;
-            unsafe { libc::munmap(p as *mut _, len) };
-            self._fd = None;
-        }
-        Ok(())
-    }
-
     /// Take the panel down: destroy the layer role, then the surface.
-    pub fn close(mut self, c: &mut Conn) -> Result<()> {
+    pub fn close(self, c: &mut Conn) -> Result<()> {
         c.send(self.layer_surface, 7, &[], &[])?;
-        c.send(self.surface, 0, &[], &[])?;
-        if let Some((p, len)) = self.map.take() {
-            unsafe { libc::munmap(p as *mut _, len) };
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Panel {
-    fn drop(&mut self) {
-        if let Some((p, len)) = self.map.take() {
-            unsafe { libc::munmap(p as *mut _, len) };
-        }
+        c.send(self.surface, 0, &[], &[])
     }
 }
 
@@ -238,7 +170,7 @@ mod tests {
         let (seen, ack_obj, ack_op, serial) = t.join().unwrap();
         assert_eq!(seen, vec![(2, 0), (2, 0), (2, 0), (3, 0), (5, 0), (7, 0), (7, 1), (7, 2), (6, 6)]);
         assert_eq!((ack_obj, ack_op, serial), (7, 6, 77));
-        assert_eq!((p.width, p.height), (1920, 24), "the compositor's size wins over the requested 0 x 24");
+        assert_eq!(p.size(), (1920, 24), "the compositor's size wins over the requested 0 x 24");
     }
 
     #[test]
@@ -277,7 +209,7 @@ mod tests {
     fn draw_makes_the_pool_once_and_checks_the_frame_size() {
         let (client, server) = UnixStream::pair().unwrap();
         let mut c = Conn::from_stream(client);
-        let mut p = Panel { surface: 6, layer_surface: 7, shm: 4, width: 4, height: 2, map: None, pool: 0, buffer: 0, _fd: None };
+        let mut p = Panel::fake(7, 4, 2);
         assert!(p.draw(&mut c, &[0; 3]).is_err());
         let frame = [0xff112233u32; 8];
         p.draw(&mut c, &frame).unwrap();
@@ -286,9 +218,9 @@ mod tests {
         let first = s.read().unwrap();
         assert_eq!((first.obj, first.opcode, first.fds.len()), (4, 0, 1), "create_pool carries the memfd");
         let mut r = first.reader();
-        assert_eq!((r.u32().unwrap(), r.i32().unwrap()), (p.pool, 32));
+        assert_eq!((r.u32().unwrap(), r.i32().unwrap()), (p.frame.ids().0, 32));
         let buf = s.read().unwrap();
-        assert_eq!((buf.obj, buf.opcode), (p.pool, 0));
+        assert_eq!((buf.obj, buf.opcode), (p.frame.ids().0, 0));
         let ops: Vec<(u32, u16)> = (0..6).map(|_| { let m = s.read().unwrap(); (m.obj, m.opcode) }).collect();
         assert_eq!(ops, vec![(6, 1), (6, 9), (6, 6), (6, 1), (6, 9), (6, 6)], "attach, damage_buffer, commit, twice, no second pool");
         // the pixels reached the shared memory that was sent
@@ -306,7 +238,7 @@ mod tests {
     fn a_new_size_acks_and_drops_the_buffer_and_close_is_reported() {
         let (client, server) = UnixStream::pair().unwrap();
         let mut c = Conn::from_stream(client);
-        let mut p = Panel { surface: 6, layer_surface: 7, shm: 4, width: 4, height: 2, map: None, pool: 0, buffer: 0, _fd: None };
+        let mut p = Panel::fake(7, 4, 2);
         p.draw(&mut c, &[0u32; 8]).unwrap();
         let mut s = Conn::from_stream(server);
         for _ in 0..5 {
@@ -314,10 +246,10 @@ mod tests {
         }
         assert_eq!(p.handle(&mut c, &msg(7, 0, &[Arg::U32(9), Arg::U32(4), Arg::U32(2)])).unwrap(), State::Open, "same size");
         assert_eq!(p.handle(&mut c, &msg(7, 0, &[Arg::U32(10), Arg::U32(8), Arg::U32(3)])).unwrap(), State::Resized);
-        assert_eq!((p.width, p.height), (8, 3));
+        assert_eq!(p.size(), (8, 3));
         let ops: Vec<(u32, u16)> = (0..4).map(|_| { let m = s.read().unwrap(); (m.obj, m.opcode) }).collect();
-        assert_eq!(ops, vec![(7, 6), (7, 6), (p.buffer, 0), (p.pool, 1)], "two acks, then buffer and pool destroyed");
-        assert!(p.map.is_none());
+        assert_eq!(ops, vec![(7, 6), (7, 6), (p.frame.ids().1, 0), (p.frame.ids().0, 1)], "two acks, then buffer and pool destroyed");
+        assert!(!p.frame.ids().2);
         assert_eq!(p.handle(&mut c, &msg(7, 1, &[])).unwrap(), State::Closed);
         assert_eq!(p.handle(&mut c, &msg(55, 0, &[])).unwrap(), State::Open, "not our object");
         let e = p.handle(&mut c, &msg(1, 0, &[Arg::U32(7), Arg::U32(2), Arg::Str("bad")])).unwrap_err().to_string();
@@ -333,8 +265,8 @@ mod tests {
         let (reg, g) = crate::wl::registry(&mut c).unwrap();
         let spec = Spec { namespace: "lazyui-test".into(), layer: LAYER_TOP, anchor: ANCHOR_BOTTOM | ANCHOR_LEFT, size: (240, 16), exclusive: 0, keyboard: KEYBOARD_NONE };
         let mut p = Panel::open(&mut c, reg, &g, &spec).unwrap();
-        println!("configured {}x{}", p.width, p.height);
-        let frame = vec![0xff1e8c3au32; (p.width * p.height) as usize];
+        println!("configured {:?}", p.size());
+        let frame = vec![0xff1e8c3au32; (p.size().0 * p.size().1) as usize];
         p.draw(&mut c, &frame).unwrap();
         std::thread::sleep(std::time::Duration::from_secs(1));
         p.close(&mut c).unwrap();

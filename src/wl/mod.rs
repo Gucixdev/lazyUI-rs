@@ -3,7 +3,9 @@
 //! compositor offers. Nothing here draws yet.
 pub mod panel;
 pub mod seat;
+pub mod shm;
 pub mod xkb;
+pub mod window;
 pub mod wire;
 
 use wire::{Arg, Conn};
@@ -44,6 +46,13 @@ pub fn registry(c: &mut Conn) -> std::io::Result<(u32, Vec<Global>)> {
             return Ok((registry, out));
         }
     }
+}
+
+/// Bind a global at the version we speak, or the compositor's if lower.
+pub(crate) fn bind(c: &mut Conn, registry: u32, g: &Global, version: u32) -> std::io::Result<u32> {
+    let id = c.new_id();
+    c.send(registry, 0, &[Arg::U32(g.name), Arg::Str(&g.interface), Arg::U32(version.min(g.version)), Arg::New(id)], &[])?;
+    Ok(id)
 }
 
 pub fn find<'a>(g: &'a [Global], interface: &str) -> Option<&'a Global> {
@@ -99,5 +108,37 @@ mod tests {
             println!("{} v{}", x.interface, x.version);
         }
         assert!(find(&g, "wl_shm").is_some());
+    }
+}
+
+/// What the event loop needs of a drawable surface: a layer-shell panel or an xdg window.
+pub trait Surface {
+    fn size(&self) -> (u32, u32);
+    fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> std::io::Result<()>;
+    /// React to one message of the connection (resize, close, ping).
+    fn handle(&mut self, c: &mut Conn, m: &wire::Msg) -> std::io::Result<panel::State>;
+}
+
+impl Surface for panel::Panel {
+    fn size(&self) -> (u32, u32) {
+        panel::Panel::size(self)
+    }
+    fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> std::io::Result<()> {
+        panel::Panel::draw(self, c, argb)
+    }
+    fn handle(&mut self, c: &mut Conn, m: &wire::Msg) -> std::io::Result<panel::State> {
+        panel::Panel::handle(self, c, m)
+    }
+}
+
+impl Surface for window::Window {
+    fn size(&self) -> (u32, u32) {
+        window::Window::size(self)
+    }
+    fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> std::io::Result<()> {
+        window::Window::draw(self, c, argb)
+    }
+    fn handle(&mut self, c: &mut Conn, m: &wire::Msg) -> std::io::Result<panel::State> {
+        window::Window::handle(self, c, m)
     }
 }
