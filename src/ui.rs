@@ -587,6 +587,13 @@ impl Ui {
         }
         self.dirty = true;
     }
+    /// Move a list's cursor to item `i` (an index into the items given to `set_list`).
+    pub fn select_list(&mut self, id: &str, i: usize) {
+        if let Some(WState::List(l, _)) = self.states.get_mut(id) {
+            l.select(i);
+            self.dirty = true;
+        }
+    }
     pub fn list_selected(&self, id: &str) -> Option<usize> {
         match self.states.get(id) {
             Some(WState::List(l, _)) => l.selected(),
