@@ -15,7 +15,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 
 | fm8-ui | lazyUI |
 |---|---|
-| `virt` (virtual list/grid) | check: `list`, `table`; grid view of thumbnails is a gap |
+| `virt` (virtual list/grid) | has: `grid` (virtual tiles with pictures and labels, `need` events for the tiles about to show; a million tiles tested for the logic, not timed); check: `list`, `table` with 100k real entries |
 | `tabs` | has: `pages` |
 | `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); a menu bar with sub-menus is a gap |
@@ -23,13 +23,13 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `dialog_frame`, overlays | has: `dialog` (modal, keys and clicks belong to it while `bind=KEY` is not 0; buttons, default, first-letter keys, esc cancels); a non-modal floating window is a gap |
 | `text_input` | has: `searchbar`; path bar with completion is a gap |
 | `progress` | has: `progressbar` |
-| `icon`, `icon_button`, thumbnails, images | gap: media layer (PNG/JPEG/WebP, icon themes) |
+| `icon`, `icon_button`, thumbnails, images | has: `media::Image` (decoded RGBA, the host decodes: filem8 has `fm8-codec`), `Canvas::image` (half-block fallback in terminals, real pixels in the window; text drawn over a picture wins), element `image bind=KEY`; gap: decoding inside lazyUI, icon themes |
 | drag and drop between panes and out | check: `drag=`/`drop=` attributes and reorder exist (`dnd`); a drop out to other programs is a gap |
 | live-reloaded theme file | check |
 | DPI scale | check |
 | editable key bindings | has: BINDINGS.md |
 
-Order of work: media layer, thumbnail grid (menus, dialogs, the draggable split and tooltips are done).
+Left before filem8 can move: decoding and icon themes (a codec crate shared with fm8-codec), timing a real 100k folder, a non-modal floating window, a drop out to other programs; question in claude-config/questions.md.
 
 ## The split
 

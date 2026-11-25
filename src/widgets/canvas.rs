@@ -189,12 +189,13 @@ pub struct Canvas {
     pub caps: Caps,
     cells: Vec<Cell>,
     clip: Rect,
+    images: Vec<crate::media::Placement>,
 }
 
 impl Canvas {
     pub fn new(w: i32, h: i32, caps: Caps) -> Canvas {
         let (w, h) = (w.clamp(0, 10_000), h.clamp(0, 10_000));
-        Canvas { w, h, caps, cells: vec![BLANK; (w * h) as usize], clip: Rect::new(0, 0, w, h) }
+        Canvas { w, h, caps, cells: vec![BLANK; (w * h) as usize], clip: Rect::new(0, 0, w, h), images: Vec::new() }
     }
     /// A blank canvas, built in the buffer of `old` when there is one (a frame that is no longer needed): no allocation
     /// once the size has settled.
@@ -207,7 +208,26 @@ impl Canvas {
         c.h = h;
         c.caps = caps;
         c.clip = Rect::new(0, 0, w, h);
+        c.images.clear();
         c
+    }
+    /// Put a picture into `rect` (cells), fitted whole and centred. Every cell it reaches gets a half-block fallback; the
+    /// native window paints real pixels over those cells (`Canvas::images`).
+    pub fn image(&mut self, rect: Rect, img: &std::sync::Arc<crate::media::Image>) {
+        let inside = rect.intersect(&self.clip);
+        for y in inside.y..inside.y + inside.h {
+            for x in inside.x..inside.x + inside.w {
+                if let (Some(i), Some(cell)) = (self.idx(x, y), crate::media::half_cell(img, rect, x, y, self.caps.unicode)) {
+                    self.cells[i] = cell;
+                }
+            }
+        }
+        if !inside.is_empty() {
+            self.images.push(crate::media::Placement { rect, img: img.clone() });
+        }
+    }
+    pub fn images(&self) -> &[crate::media::Placement] {
+        &self.images
     }
     pub fn glyphs(&self) -> Glyphs {
         if self.caps.unicode {

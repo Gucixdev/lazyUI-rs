@@ -15,6 +15,7 @@ pub struct Cx<'a> {
     pub el: &'a El,
     pub theme: &'a Theme,
     pub(crate) model: &'a HashMap<String, Value>,
+    pub(crate) images: &'a HashMap<String, std::sync::Arc<crate::media::Image>>,
     pub focused: bool,
     pub unicode: bool,
     /// seconds on the Ui clock (it only moves with `tick`, so headless runs are repeatable)
@@ -30,6 +31,10 @@ impl Cx<'_> {
     }
     pub fn num_attr(&self, k: &str, default: f64) -> f64 {
         self.el.attr(k).and_then(|s| s.trim().parse::<f64>().ok()).filter(|x| x.is_finite()).unwrap_or(default)
+    }
+    /// The picture the host registered under `k` (`Ui::set_image`).
+    pub fn image(&self, k: &str) -> Option<&std::sync::Arc<crate::media::Image>> {
+        self.images.get(k)
     }
     pub fn model_text(&self, k: &str) -> Option<String> {
         self.model.get(k).map(|v| match v {
@@ -114,6 +119,12 @@ impl EvCx<'_> {
             Value::Text(t) => t.trim().parse().unwrap_or(0.0),
         })
     }
+    pub fn model_text(&self, k: &str) -> Option<String> {
+        self.model.get(k).map(|v| match v {
+            Value::Text(t) => t.clone(),
+            Value::Num(n) => format!("{n}"),
+        })
+    }
 }
 
 pub trait Widget {
@@ -179,7 +190,7 @@ pub struct Def {
     pub make: fn() -> Box<dyn Widget>,
 }
 
-const TABLES: [&[Def]; 11] = [crate::charts::DEFS, crate::lists::DEFS, crate::menu::DEFS, crate::splitter::DEFS, crate::dialog::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS, crate::fancy::DEFS, crate::bars::DEFS, crate::pickers::DEFS];
+const TABLES: [&[Def]; 13] = [crate::charts::DEFS, crate::lists::DEFS, crate::menu::DEFS, crate::splitter::DEFS, crate::dialog::DEFS, crate::media::DEFS, crate::grid::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS, crate::fancy::DEFS, crate::bars::DEFS, crate::pickers::DEFS];
 
 pub fn find(name: &str) -> Option<&'static Def> {
     all().find(|d| d.name == name)

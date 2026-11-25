@@ -7,6 +7,7 @@ pub mod dialog;
 pub mod dnd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fdctl;
+pub mod grid;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod headless;
@@ -14,6 +15,7 @@ pub mod i18n;
 pub mod input;
 pub mod layout;
 pub mod lists;
+pub mod media;
 pub mod menu;
 pub mod splitter;
 pub mod native;

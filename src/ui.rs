@@ -373,6 +373,7 @@ pub struct Ui {
     widgets: crate::components::Widgets,
     pub theme: Theme,
     model: HashMap<String, Value>,
+    images: HashMap<String, std::sync::Arc<crate::media::Image>>,
     states: HashMap<String, WState>,
     springs: HashMap<String, Spring>,
     focus: Option<String>,
@@ -406,6 +407,7 @@ impl Ui {
             widgets: crate::components::Widgets::builtin(),
             theme: Theme::green(),
             model: HashMap::new(),
+            images: HashMap::new(),
             states: HashMap::new(),
             grab: None,
             tip: None,
@@ -497,6 +499,16 @@ impl Ui {
     }
 
     // model
+    /// Register a decoded picture under `key`; `image bind=KEY` elements show it. Replacing a picture redraws.
+    pub fn set_image(&mut self, key: &str, img: crate::media::Image) {
+        self.images.insert(key.to_string(), std::sync::Arc::new(img));
+        self.dirty = true;
+    }
+    pub fn remove_image(&mut self, key: &str) {
+        if self.images.remove(key).is_some() {
+            self.dirty = true;
+        }
+    }
     pub fn set(&mut self, key: &str, v: f64) {
         self.put(key, Value::Num(v));
     }
@@ -807,7 +819,7 @@ impl Ui {
             let Some(el) = Ui::el_at(&root, &p.path()) else { continue };
             let focused = self.focus.as_deref() == Some(p.id());
             if let Some(WState::Custom(w)) = self.states.get_mut(p.id()) {
-                let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, focused, unicode: c.caps.unicode, time: self.clock };
+                let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, images: &self.images, focused, unicode: c.caps.unicode, time: self.clock };
                 w.overlay(c, p.rect, &cx);
             }
         }
@@ -958,7 +970,7 @@ impl Ui {
                 let focused = self.focus.as_deref() == Some(p.id());
                 let st = self.states.entry(p.id().to_string()).or_insert_with(|| WState::Custom((def.make)()));
                 if let WState::Custom(w) = st {
-                    let cx = crate::native::Cx { el, theme: &t, model: &self.model, focused, unicode: c.caps.unicode, time: self.clock };
+                    let cx = crate::native::Cx { el, theme: &t, model: &self.model, images: &self.images, focused, unicode: c.caps.unicode, time: self.clock };
                     w.draw(c, r, &cx);
                 }
             }
@@ -1422,7 +1434,7 @@ impl Ui {
                 }
                 (Kind::Custom(_), Some(WState::Custom(w))) => {
                     let focused = ui.focus.as_deref() == Some(p.id());
-                    let cx = crate::native::Cx { el, theme: &ui.theme, model: &ui.model, focused, unicode: true, time: ui.clock };
+                    let cx = crate::native::Cx { el, theme: &ui.theme, model: &ui.model, images: &ui.images, focused, unicode: true, time: ui.clock };
                     out.push_str(&w.describe(&cx));
                 }
                 _ => out.push_str("{}"),
@@ -1606,7 +1618,7 @@ impl Ui {
         let focused = self.focus.as_deref() == Some(id);
         match self.states.get_mut(id) {
             Some(WState::Custom(wd)) => {
-                let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, focused, unicode: true, time: self.clock };
+                let cx = crate::native::Cx { el, theme: &self.theme, model: &self.model, images: &self.images, focused, unicode: true, time: self.clock };
                 wd.pixels(&cx, w, h)
             }
             _ => None,

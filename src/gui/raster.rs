@@ -179,7 +179,10 @@ impl Raster {
                 if same && prev.map(|p| p.get(x, y) == Some(c)).unwrap_or(false) && !tail_changed {
                     continue;
                 }
-                self.cell(px, x as usize, y as usize, c, wide);
+                match cur.images().iter().find(|p| p.rect.contains(x, y) && crate::media::half_cell(&p.img, p.rect, x, y, cur.caps.unicode) == Some(c)) {
+                    Some(p) => self.image_cell(px, x as usize, y as usize, p),
+                    None => self.cell(px, x as usize, y as usize, c, wide),
+                }
                 n += 1;
             }
         }
@@ -203,6 +206,24 @@ impl Raster {
         let t = cov as f32 / 255.0;
         for k in 0..3 {
             px.rgba[o + k] = (px.rgba[o + k] as f32 * (1.0 - t) + col[k] as f32 * t).round() as u8;
+        }
+    }
+
+    /// One cell of a placed picture in real pixels: the part of the fitted picture that falls in this cell, the window
+    /// background where the picture does not reach.
+    fn image_cell(&self, px: &mut Pixels, cx: usize, cy: usize, p: &crate::media::Placement) {
+        let (dw, dh) = (p.rect.w as usize * self.cw, p.rect.h as usize * self.ch);
+        let (ox, oy) = ((cx - p.rect.x as usize) * self.cw, (cy - p.rect.y as usize) * self.ch);
+        for y in 0..self.ch {
+            for x in 0..self.cw {
+                let (gx, gy) = (cx * self.cw + x, cy * self.ch + y);
+                if gx >= px.w || gy >= px.h {
+                    continue;
+                }
+                let col = p.img.sample(dw, dh, ox + x, oy + y).unwrap_or(self.default_bg);
+                let o = (gy * px.w + gx) * 4;
+                px.rgba[o..o + 3].copy_from_slice(&col);
+            }
         }
     }
 
@@ -372,5 +393,28 @@ mod tests {
             let o = ((r.ch + y) * px.w + x) * 4;
             assert!(px.rgba[o] > 200 || px.rgba[o - 4] > 200, "gap at row {y}");
         }
+    }
+
+    #[test]
+    fn a_placed_picture_is_painted_in_pixels_and_text_over_it_wins() {
+        use crate::canvas::{Caps, Canvas, Rect, Style};
+        use crate::media::Image;
+        let Ok(mut r) = Raster::system(14.0, None) else { return };
+        let img = std::sync::Arc::new(Image::new(2, 2, [200u8, 10, 10, 255].iter().copied().cycle().take(16).collect()).unwrap());
+        let mut c = Canvas::new(6, 4, Caps::FULL);
+        c.image(Rect::new(0, 0, 6, 2), &img);
+        let mut px = Pixels::new(6 * r.cw, 4 * r.ch, [0, 0, 0]);
+        r.paint(&mut px, None, &c);
+        let at = |px: &Pixels, x: usize, y: usize| { let o = (y * px.w + x) * 4; [px.rgba[o], px.rgba[o + 1], px.rgba[o + 2]] };
+        // a square picture in 6 x 2 cells (6 cw by about 4 cw): bars of about one cell at the left and right
+        assert_eq!(at(&px, r.cw * 3 + 1, r.ch / 2), [200, 10, 10], "inside the picture");
+        assert_eq!(at(&px, 2, r.ch / 2), r.default_bg, "the bar at the left");
+        // a letter drawn over the picture afterwards is a glyph, not picture
+        c.put(2, 0, 'W', Style::fg(crate::canvas::rgb(255, 255, 255)));
+        let mut again = Pixels::new(6 * r.cw, 4 * r.ch, [0, 0, 0]);
+        r.paint(&mut again, None, &c);
+        let lit = (0..r.ch).flat_map(|y| (0..r.cw).map(move |x| (x, y))).filter(|&(x, y)| at(&again, r.cw * 2 + x, y) != [200, 10, 10]).count();
+        assert!(lit as usize > r.cw * r.ch / 2, "the cell is a glyph on the window background, not picture: {lit}");
+        assert_eq!(at(&again, r.cw * 3 + 2, r.ch / 2), [200, 10, 10], "the neighbour cell is still picture");
     }
 }
