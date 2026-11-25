@@ -11,6 +11,8 @@ pub struct Frame {
     shm: u32,
     pub width: u32,
     pub height: u32,
+    /// buffer scale: the buffer is `width * scale` by `height * scale` pixels for a surface of `width` by `height`
+    pub scale: u32,
     map: Option<(*mut u8, usize)>,
     pool: u32,
     buffer: u32,
@@ -19,13 +21,13 @@ pub struct Frame {
 
 impl Frame {
     pub fn new(surface: u32, shm: u32, width: u32, height: u32) -> Frame {
-        Frame { surface, shm, width, height, map: None, pool: 0, buffer: 0, _fd: None }
+        Frame { surface, shm, width, height, scale: 1, map: None, pool: 0, buffer: 0, _fd: None }
     }
 
     /// Put one frame on screen: `argb` is `width * height` pixels, 0xAARRGGBB. Makes the pool on the first call; the
     /// buffer is reused, so call again only after the compositor released it (or for a single frame).
     pub fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> Result<()> {
-        let (w, h) = (self.width as usize, self.height as usize);
+        let (w, h) = ((self.width * self.scale) as usize, (self.height * self.scale) as usize);
         if argb.len() != w * h {
             return Err(Error::other(format!("frame has {} pixels, the surface needs {}", argb.len(), w * h)));
         }
@@ -55,6 +57,17 @@ impl Frame {
         c.send(self.surface, 1, &[Arg::Obj(self.buffer), Arg::I32(0), Arg::I32(0)], &[])?;
         c.send(self.surface, 9, &[Arg::I32(0), Arg::I32(0), Arg::I32(w as i32), Arg::I32(h as i32)], &[])?;
         c.send(self.surface, 6, &[], &[])
+    }
+
+    /// A new output scale: the compositor is told, the buffer is dropped so the next `draw` makes one of the new size.
+    pub fn set_scale(&mut self, c: &mut Conn, scale: u32) -> Result<()> {
+        let scale = scale.max(1);
+        if scale == self.scale {
+            return Ok(());
+        }
+        self.scale = scale;
+        c.send(self.surface, 8, &[Arg::I32(scale as i32)], &[])?;
+        self.resize(c, self.width, self.height)
     }
 
     /// A new size: the buffer and pool are destroyed, the next `draw` makes ones that fit.

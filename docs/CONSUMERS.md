@@ -26,7 +26,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `icon`, `icon_button`, thumbnails, images | has: `media::Image` (decoded RGBA, the host decodes: filem8 has `fm8-codec`), `Canvas::image` (half-block fallback in terminals, real pixels in the window; text drawn over a picture wins), element `image bind=KEY`; gap: decoding inside lazyUI, icon themes |
 | drag and drop between panes and out | check: `drag=`/`drop=` attributes and reorder exist (`dnd`); a drop out to other programs is a gap |
 | live-reloaded theme file | check |
-| DPI scale | check |
+| DPI scale | has: the native window follows `wl_output.scale` of the outputs it is on (`set_buffer_scale`, font and pointer cells rescaled); fractional scales and the winit window's own `ScaleFactorChanged` are separate; not seen on a real 2x output |
 | editable key bindings | has: BINDINGS.md |
 
 Left before filem8 can move: decoding and icon themes (a codec crate shared with fm8-codec), timing a real 100k folder, a non-modal floating window, a drop out to other programs; question in claude-config/questions.md.

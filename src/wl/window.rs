@@ -14,6 +14,9 @@ pub struct Window {
     frame: Frame,
     /// the size the last toplevel `configure` asked for; applied when its `xdg_surface.configure` arrives
     asked: (u32, u32),
+    /// every `wl_output` with its scale, and the ones the surface is on now
+    outputs: Vec<(u32, u32)>,
+    entered: Vec<u32>,
 }
 
 fn protocol_error(m: &Msg) -> Result<()> {
@@ -41,7 +44,11 @@ impl Window {
         c.send(toplevel, 2, &[Arg::Str(title)], &[])?;
         c.send(toplevel, 3, &[Arg::Str(app_id)], &[])?;
         c.send(surface, 6, &[], &[])?;
-        let mut w = Window { surface, base, xdg_surface, toplevel, frame: Frame::new(surface, shm, size.0, size.1), asked: (0, 0) };
+        let mut outputs = Vec::new();
+        for g in globals.iter().filter(|g| g.interface == "wl_output") {
+            outputs.push((bind(c, registry, g, 2)?, 1));
+        }
+        let mut w = Window { surface, base, xdg_surface, toplevel, frame: Frame::new(surface, shm, size.0, size.1), asked: (0, 0), outputs, entered: Vec::new() };
         loop {
             let m = c.read()?;
             protocol_error(&m)?;
@@ -58,6 +65,11 @@ impl Window {
         (self.frame.width, self.frame.height)
     }
 
+    /// The buffer scale: the largest scale among the outputs the window is on (1 until one is known).
+    pub fn scale(&self) -> u32 {
+        self.entered.iter().filter_map(|id| self.outputs.iter().find(|o| o.0 == *id)).map(|o| o.1).max().unwrap_or(1).max(1)
+    }
+
     pub fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> Result<()> {
         self.frame.draw(c, argb)
     }
@@ -65,6 +77,21 @@ impl Window {
     /// Ping (answered), a configure (acked; a new size drops the buffer) and the close request.
     pub fn handle(&mut self, c: &mut Conn, m: &Msg) -> Result<State> {
         protocol_error(m)?;
+        if m.obj == self.surface && m.opcode <= 1 {
+            let id = m.reader().u32()?;
+            self.entered.retain(|x| *x != id);
+            if m.opcode == 0 {
+                self.entered.push(id);
+            }
+            return self.follow_scale(c);
+        }
+        if let Some(o) = self.outputs.iter_mut().find(|o| o.0 == m.obj) {
+            if m.opcode == 3 {
+                o.1 = m.reader().i32()?.max(1) as u32;
+                return self.follow_scale(c);
+            }
+            return Ok(State::Open);
+        }
         if m.obj == self.base && m.opcode == 0 {
             let serial = m.reader().u32()?;
             c.send(self.base, 3, &[Arg::U32(serial)], &[])?;
@@ -86,6 +113,15 @@ impl Window {
         Ok(State::Open)
     }
 
+    fn follow_scale(&mut self, c: &mut Conn) -> Result<State> {
+        let s = self.scale();
+        if s == self.frame.scale {
+            return Ok(State::Open);
+        }
+        self.frame.set_scale(c, s)?;
+        Ok(State::Resized)
+    }
+
     /// Destroy the role objects from the inside out, then the surface.
     pub fn close(self, c: &mut Conn) -> Result<()> {
         c.send(self.toplevel, 0, &[], &[])?;
@@ -95,7 +131,7 @@ impl Window {
 
     #[cfg(test)]
     pub(crate) fn fake(size: (u32, u32)) -> Window {
-        Window { surface: 6, base: 3, xdg_surface: 7, toplevel: 8, frame: Frame::new(6, 4, size.0, size.1), asked: (0, 0) }
+        Window { surface: 6, base: 3, xdg_surface: 7, toplevel: 8, frame: Frame::new(6, 4, size.0, size.1), asked: (0, 0), outputs: Vec::new(), entered: Vec::new() }
     }
 }
 
@@ -161,6 +197,26 @@ mod tests {
         assert_eq!(w.handle(&mut c, &msg(8, 1, &[])).unwrap(), State::Closed);
         let e = w.handle(&mut c, &msg(1, 0, &[Arg::U32(5), Arg::U32(1), Arg::Str("nope")])).unwrap_err().to_string();
         assert!(e.contains("code 1: nope"), "{e}");
+    }
+
+    #[test]
+    fn the_scale_follows_the_outputs_the_surface_is_on_and_sizes_the_buffer() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let mut c = Conn::from_stream(client);
+        let mut s = Conn::from_stream(server);
+        let mut w = Window::fake((100, 50));
+        w.outputs = vec![(20, 1), (21, 1)];
+        assert_eq!(w.scale(), 1, "on no output yet");
+        assert_eq!(w.handle(&mut c, &msg(6, 0, &[Arg::Obj(21)])).unwrap(), State::Open, "entering a 1x output changes nothing");
+        assert_eq!(w.handle(&mut c, &msg(21, 3, &[Arg::I32(2)])).unwrap(), State::Resized);
+        let set = s.read().unwrap();
+        assert_eq!((set.obj, set.opcode, set.reader().i32().unwrap()), (6, 8, 2), "set_buffer_scale 2");
+        assert_eq!(w.scale(), 2);
+        assert_eq!(w.size(), (100, 50), "the size stays in surface units");
+        assert!(w.draw(&mut c, &vec![0; 100 * 50]).is_err(), "a 2x buffer needs 200 x 100 pixels");
+        assert_eq!(w.handle(&mut c, &msg(6, 1, &[Arg::Obj(21)])).unwrap(), State::Resized, "leaving the 2x output");
+        assert_eq!(w.scale(), 1);
+        assert_eq!(w.handle(&mut c, &msg(20, 1, &[Arg::I32(0), Arg::I32(0)])).unwrap(), State::Open, "other output events are ignored");
     }
 
     #[test]

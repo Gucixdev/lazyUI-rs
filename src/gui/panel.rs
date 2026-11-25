@@ -47,7 +47,8 @@ pub fn theme_of(e: &crate::fdctl::Event) -> Option<&str> {
 /// Draw `ui` once into an open panel or window.
 pub fn show(p: &mut impl Surface, conn: &mut Conn, ui: &mut Ui, r: &mut Raster) -> std::io::Result<()> {
     let (w, h) = p.size();
-    let f = frame(ui, r, w as usize, h as usize);
+    let s = p.scale() as usize;
+    let f = frame(ui, r, w as usize * s, h as usize * s);
     p.draw(conn, &f)
 }
 
@@ -94,6 +95,7 @@ impl Follow {
 pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, r: &mut Raster, follow: Option<&Follow>, on: &mut dyn FnMut(&mut Ui, UiEvent)) -> std::io::Result<()> {
     let mut last = Instant::now();
     let mut closed = false;
+    let (base_px, mut scale) = (r.px(), 1u32);
     loop {
         while let Some(m) = conn.take()? {
             match p.handle(conn, &m)? {
@@ -122,6 +124,12 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
         }
         if ui.quit || closed {
             return Ok(());
+        }
+        if p.scale() != scale {
+            scale = p.scale();
+            r.set_px(base_px * scale as f32);
+            seat.set_cell(r.cw as f64 / scale as f64, r.ch as f64 / scale as f64);
+            ui.dirty = true;
         }
         if ui.dirty {
             show(p, conn, ui, r)?;
@@ -183,6 +191,17 @@ mod tests {
         let bg = f[w * h - 1];
         assert!(f.iter().any(|&p| p != bg), "some pixel differs from the background: the text was drawn");
         assert!(f.iter().all(|&p| p >> 24 == 0xff), "opaque");
+    }
+
+    #[test]
+    fn a_larger_font_px_gives_larger_cells_and_a_larger_frame() {
+        let Ok(mut r) = Raster::system(14.0, None) else { return };
+        let (cw, ch) = (r.cw, r.ch);
+        r.set_px(28.0);
+        assert!(r.cw >= cw * 2 - 1 && r.ch >= ch * 2 - 1 && r.px() == 28.0, "{}x{} -> {}x{}", cw, ch, r.cw, r.ch);
+        let mut ui = Ui::new(crate::prelude::text("hi"));
+        let (w, h) = (r.cw * 6, r.ch * 2);
+        assert_eq!(frame(&mut ui, &mut r, w, h).len(), w * h);
     }
 
     #[test]

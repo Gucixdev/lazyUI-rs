@@ -50,6 +50,11 @@ impl Seat {
         Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0, keyboard: None, xkb: None, mods: Mods::NONE, keyboard_note: None, repeat_rate: (25, 600), held_key: None })
     }
 
+    /// A new cell size in surface units (the cell in pixels divided by the output scale).
+    pub fn set_cell(&mut self, cw: f64, ch: f64) {
+        self.cell = (cw.max(1.0), ch.max(1.0));
+    }
+
     fn cell_at(&self) -> (i32, i32) {
         ((self.pos.0 / self.cell.0).floor() as i32, (self.pos.1 / self.cell.1).floor() as i32)
     }

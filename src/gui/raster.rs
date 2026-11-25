@@ -92,6 +92,21 @@ impl Raster {
         Ok(Raster { font, px, cw, ch, ascent: lm.ascent.round() as i32, cache: HashMap::new(), default_fg: [205, 230, 205], default_bg: [10, 20, 12] })
     }
 
+    pub fn px(&self) -> f32 {
+        self.px
+    }
+
+    /// Change the font size (a new output scale): cell size and glyph cache follow.
+    pub fn set_px(&mut self, px: f32) {
+        if let Some(lm) = self.font.horizontal_line_metrics(px) {
+            self.ch = (lm.ascent - lm.descent + lm.line_gap).ceil().max(1.0) as usize;
+            self.cw = self.font.metrics('M', px).advance_width.round().max(1.0) as usize;
+            self.ascent = lm.ascent.round() as i32;
+            self.px = px;
+            self.cache.clear();
+        }
+    }
+
     /// A monospace font from the system (`fc-match`), or the first of a few well-known paths.
     pub fn system(px: f32, path: Option<&str>) -> Result<Raster, String> {
         let mut tried = Vec::new();

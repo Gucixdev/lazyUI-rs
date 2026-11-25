@@ -114,6 +114,10 @@ mod tests {
 /// What the event loop needs of a drawable surface: a layer-shell panel or an xdg window.
 pub trait Surface {
     fn size(&self) -> (u32, u32);
+    /// Buffer pixels per surface unit (a 2x output asks for twice the pixels).
+    fn scale(&self) -> u32 {
+        1
+    }
     fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> std::io::Result<()>;
     /// React to one message of the connection (resize, close, ping).
     fn handle(&mut self, c: &mut Conn, m: &wire::Msg) -> std::io::Result<panel::State>;
@@ -134,6 +138,9 @@ impl Surface for panel::Panel {
 impl Surface for window::Window {
     fn size(&self) -> (u32, u32) {
         window::Window::size(self)
+    }
+    fn scale(&self) -> u32 {
+        window::Window::scale(self)
     }
     fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> std::io::Result<()> {
         window::Window::draw(self, c, argb)
