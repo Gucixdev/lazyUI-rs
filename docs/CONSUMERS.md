@@ -7,7 +7,7 @@ Decided 2026-11-24: lazyUI-rs is the one UI standard. Programs move over only wh
 | filem8 | own `fm8-ui` (1.9k lines, wgpu+winit, immediate mode) | every row below is "has" |
 | steamdeck_launcher | iced | window backend + gamepad focus + lists |
 | fastkit | Go + TypeScript web stack | the web backend (wasm/htmx) covers its forms and tables |
-| finedesktop | already a client (themes, ctl) | stays additive-only |
+| finedesktop | already a client (themes, ctl) | stays additive-only; shared theme file done (`Theme::from_finedesktop`), layer-shell backend not started |
 
 ## filem8: fm8-ui primitive -> lazyUI
 

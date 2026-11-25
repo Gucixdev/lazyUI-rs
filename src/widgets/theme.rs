@@ -76,6 +76,25 @@ impl Theme {
             _ => None,
         }
     }
+    /// A finedesktop theme by name: `$FD_CONFIG_DIR/themes/NAME`, else `$XDG_CONFIG_HOME/finedesktop/themes/NAME`
+    /// (default `~/.config`). Same file, same colours as the desktop; the built-in ones of finedesktop live in its binary.
+    pub fn from_finedesktop(name: &str) -> Result<Theme, String> {
+        if name.is_empty() || name.contains('/') || name.contains("..") {
+            return Err(format!("bad theme name `{name}`"));
+        }
+        let dir = match std::env::var_os("FD_CONFIG_DIR").filter(|v| !v.is_empty()) {
+            Some(d) => std::path::PathBuf::from(d),
+            None => {
+                let base = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()).map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")));
+                base.ok_or("no HOME")?.join("finedesktop")
+            }
+        };
+        let path = dir.join("themes").join(name);
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut t = Theme::parse(&text)?;
+        t.name = name.to_string();
+        Ok(t)
+    }
     /// `slot = #rrggbb` lines on top of a preset (`base = matrix`); `#` starts a comment only at the start of a line.
     pub fn parse(text: &str) -> Result<Theme, String> {
         let mut t = Theme::green();
@@ -86,6 +105,17 @@ impl Theme {
             }
             let (k, v) = line.split_once('=').ok_or_else(|| format!("line {}: expected `slot = value`", n + 1))?;
             let (k, v) = (k.trim(), v.trim());
+            // finedesktop theme files: `border = 2` is a width there, not a colour; gap, animations and the
+            // bar colours have no slot here and are skipped, so one file themes both programs
+            if matches!(k, "gap" | "animations" | "bar_bg" | "bar_fg") || (k == "border" && v.parse::<i64>().is_ok()) {
+                continue;
+            }
+            let k = match k {
+                "border_normal" => "border",
+                "border_focus" => "focus",
+                "urgent" => "err",
+                other => other,
+            };
             if k == "base" {
                 t = Theme::by_name(v).ok_or_else(|| format!("line {}: unknown base theme `{}`", n + 1, v))?;
                 continue;
@@ -156,6 +186,30 @@ mod tests {
         let t = Theme::parse("base = matrix\naccent = #ff0000\n# comment\n").unwrap();
         assert_eq!(t.accent, Color::Rgb(255, 0, 0));
         assert_eq!(t.bg, Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn a_finedesktop_theme_file_parses_unchanged() {
+        let dracula = "bg = #282a36\nfg = #f8f8f2\ndim = #6272a4\naccent = #bd93f9\nerr = #ff5555\nbar_bg = #21222c\nsel_bg = #bd93f9\nsel_fg = #282a36\nborder_normal = #44475a\nborder_focus = #bd93f9\nborder = 2\ngap = 6\nanimations = on\n";
+        let t = Theme::parse(dracula).unwrap();
+        assert_eq!((t.bg, t.accent, t.err), (Color::Rgb(0x28, 0x2a, 0x36), Color::Rgb(0xbd, 0x93, 0xf9), Color::Rgb(0xff, 0x55, 0x55)));
+        assert_eq!((t.border, t.focus), (Color::Rgb(0x44, 0x47, 0x5a), Color::Rgb(0xbd, 0x93, 0xf9)));
+        assert_eq!(Theme::parse("border = #112233").unwrap().border, Color::Rgb(0x11, 0x22, 0x33), "a colour border still works");
+        assert_eq!(Theme::parse("urgent = #010203").unwrap().err, Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn from_finedesktop_reads_the_desktop_folder_and_refuses_paths() {
+        let base = std::env::temp_dir().join(format!("lui-fdtheme-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("themes")).unwrap();
+        std::fs::write(base.join("themes/mine"), "accent = #0a0b0c\nborder = 3\n").unwrap();
+        std::env::set_var("FD_CONFIG_DIR", &base);
+        let t = Theme::from_finedesktop("mine").unwrap();
+        assert_eq!((t.name.as_str(), t.accent), ("mine", Color::Rgb(10, 11, 12)));
+        assert!(Theme::from_finedesktop("../mine").is_err() && Theme::from_finedesktop("nope").is_err());
+        std::env::remove_var("FD_CONFIG_DIR");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
