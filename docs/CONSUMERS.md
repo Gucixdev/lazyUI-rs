@@ -11,7 +11,7 @@ Decided 2026-11-24: lazyUI-rs is the one UI standard. Programs move over only wh
 
 ## filem8: fm8-ui primitive -> lazyUI
 
-Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). Nothing here was measured; `check` rows need a test with 100k entries and real icons.
+Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). Only the rows that say so were measured.
 
 | fm8-ui | lazyUI |
 |---|---|
@@ -20,10 +20,10 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); `menubar` (titles, drop-downs, one level of sub-menus, keys and mouse, `activate` carries `File/Recent/a`) |
 | `tooltip` | has: `tip="text"` on any element (half a second of rest, `\n` breaks lines, long text wraps at 40 cells) |
-| `dialog_frame`, overlays | has: `dialog` (modal, keys and clicks belong to it while `bind=KEY` is not 0; buttons, default, first-letter keys, esc cancels); a non-modal floating window is a gap |
+| `dialog_frame`, overlays | has: `dialog` (modal, keys and clicks belong to it while `bind=KEY` is not 0; buttons, default, first-letter keys, esc cancels); `floatwin` is the non-modal one (draggable, scrolls, `x`/esc closes; inside the window, not a second toplevel) |
 | `text_input` | has: `searchbar`; `pathbar` (Tab completion on the file system or from the host, `~/`, directories first, popup) |
 | `progress` | has: `progressbar` |
-| `icon`, `icon_button`, thumbnails, images | has: `media::Image` (decoded RGBA, the host decodes: filem8 has `fm8-codec`), `Canvas::image` (half-block fallback in terminals, real pixels in the window; text drawn over a picture wins), element `image bind=KEY`; gap: decoding inside lazyUI, icon themes |
+| `icon`, `icon_button`, thumbnails, images | has: `media::Image` (decoded RGBA, the host decodes: filem8 has `fm8-codec`), `Canvas::image` (half-block fallback in terminals, real pixels in the window; text drawn over a picture wins), element `image bind=KEY`; decoding stays with the host (`fm8-codec`, by decision); icon themes: the host asks the theme, `fm8-lz` does it on a worker thread (never seen working here: no PNG theme installed, SVG needs a rasteriser) |
 | drag and drop between panes and out | has: `drag=`/`drop=` and list reorder inside the window; in the native window a drag that leaves it becomes a `wl_data_device` drag of `text/uri-list` (`drag=` paths, one per line), and files dropped from other programs reach the `drop=file` element under the pointer (`wl::dnd`, tested over a fake compositor; never run against a real one, no second client to drop onto) |
 | live-reloaded theme file | has: the native window and panel follow finedesktop `theme` events (`panel::Follow`, `Theme::from_finedesktop`); a real switch on the desktop was not watched |
 | DPI scale | has: the native window follows `wl_output.scale` of the outputs it is on (`set_buffer_scale`, font and pointer cells rescaled); fractional scales and the winit window's own `ScaleFactorChanged` are separate; not seen on a real 2x output |
