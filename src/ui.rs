@@ -609,6 +609,16 @@ impl Ui {
             self.every.push((seconds, 0.0, event.to_string()));
         }
     }
+    /// The attribute `key` of the element with this `id` (the first one, when ids repeat).
+    pub fn attr_of(&self, id: &str, key: &str) -> Option<String> {
+        fn find(el: &El, id: &str, key: &str) -> Option<String> {
+            if el.attr("id") == Some(id) {
+                return el.attr(key).map(str::to_string);
+            }
+            el.children.iter().find_map(|c| find(c, id, key))
+        }
+        find(&self.root, id, key)
+    }
     pub fn emit(&mut self, id: &str, kind: &str, text: &str, number: f64) {
         let mut e = UiEvent::new(id, kind);
         e.text = text.into();
@@ -1697,6 +1707,14 @@ fn fmt_num(n: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn attr_of_finds_an_attribute_by_element_id() {
+        let ui = Ui::from_spec("col\n  text id=go text=Go hook=started\n  row\n    text id=no text=No\n").unwrap();
+        assert_eq!(ui.attr_of("go", "hook").as_deref(), Some("started"));
+        assert_eq!(ui.attr_of("no", "hook"), None);
+        assert_eq!(ui.attr_of("nope", "hook"), None);
+    }
+
     use super::*;
     use crate::canvas::Caps;
 

@@ -96,6 +96,7 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
     let mut last = Instant::now();
     let mut closed = false;
     let (base_px, mut scale) = (r.px(), 1u32);
+    let hook_sock = fdctl::socket();
     loop {
         while let Some(m) = conn.take()? {
             match p.handle(conn, &m)? {
@@ -119,6 +120,13 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
                 break;
             }
             for e in evs {
+                if let (Some(sock), Some(name)) = (&hook_sock, ui.attr_of(&e.id, "hook")) {
+                    let line = fdctl::hook_line(&name, &e.kind, &e.id, &e.text);
+                    let sock = sock.clone();
+                    std::thread::spawn(move || {
+                        let _ = fdctl::send(&sock, &line);
+                    });
+                }
                 on(ui, e);
             }
         }

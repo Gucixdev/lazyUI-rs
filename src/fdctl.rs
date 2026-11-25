@@ -37,6 +37,13 @@ pub fn send(sock: &Path, action: &str) -> std::io::Result<String> {
     Ok(line)
 }
 
+/// The control line that turns a lazyui event into a finedesktop user event: `emit NAME KIND ID TEXT`, so a script in
+/// `hooks/on-user` (or a subscriber) sees what happened where. Newlines in the text become spaces.
+pub fn hook_line(name: &str, kind: &str, id: &str, text: &str) -> String {
+    let text: String = text.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
+    format!("emit {name} {kind} {id} {text}").trim_end().to_string()
+}
+
 /// One event line: `kind` is the first word (`theme`, `focus`, `layout`, ...), `rest` the remainder.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
@@ -86,6 +93,13 @@ impl Iterator for Subscription {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_ui_event_becomes_one_emit_line() {
+        assert_eq!(hook_line("files", "activate", "list", "a b.txt"), "emit files activate list a b.txt");
+        assert_eq!(hook_line("files", "close", "win", ""), "emit files close win");
+        assert_eq!(hook_line("n", "k", "i", "x\ny"), "emit n k i x y");
+    }
+
     use super::*;
     use std::os::unix::net::UnixListener;
 
