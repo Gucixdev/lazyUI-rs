@@ -21,7 +21,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); a menu bar with sub-menus is a gap |
 | `tooltip` | has: `tip="text"` on any element (half a second of rest, one line; multi-line is a gap) |
 | `dialog_frame`, overlays | has: `dialog` (modal, keys and clicks belong to it while `bind=KEY` is not 0; buttons, default, first-letter keys, esc cancels); a non-modal floating window is a gap |
-| `text_input` | has: `searchbar`; path bar with completion is a gap |
+| `text_input` | has: `searchbar`; `pathbar` (Tab completion on the file system or from the host, `~/`, directories first, popup) |
 | `progress` | has: `progressbar` |
 | `icon`, `icon_button`, thumbnails, images | has: `media::Image` (decoded RGBA, the host decodes: filem8 has `fm8-codec`), `Canvas::image` (half-block fallback in terminals, real pixels in the window; text drawn over a picture wins), element `image bind=KEY`; gap: decoding inside lazyUI, icon themes |
 | drag and drop between panes and out | check: `drag=`/`drop=` attributes and reorder exist (`dnd`); a drop out to other programs is a gap |

@@ -17,6 +17,7 @@ pub mod layout;
 pub mod lists;
 pub mod media;
 pub mod menu;
+pub mod pathbar;
 pub mod splitter;
 pub mod native;
 pub mod plan;
