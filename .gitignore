@@ -4,3 +4,4 @@ references/lazytui/
 web/dist/
 .lake/
 lean-manifest.json
+__pycache__/
