@@ -3,6 +3,7 @@
 //! compositor offers. Nothing here draws yet.
 pub mod panel;
 pub mod seat;
+pub mod xkb;
 pub mod wire;
 
 use wire::{Arg, Conn};

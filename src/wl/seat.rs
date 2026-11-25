@@ -1,11 +1,14 @@
-//! The pointer of a `wl_seat`, turned into lazyui mouse events in cells. Keyboard is not here: its keys arrive as
-//! scancodes plus an xkb keymap file, which needs a keymap parser.
+//! The pointer and keyboard of a `wl_seat`, turned into lazyui events: the pointer as mouse events in cells, the
+//! keyboard through libxkbcommon (`xkb`, loaded at run time; without it there is no keyboard). No key repeat yet:
+//! the compositor does not repeat for clients, the client must, with the rate from `wl_keyboard.repeat_info`.
 use super::wire::{Arg, Conn, Msg};
+use super::xkb::Xkb;
 use super::{find, Global};
 use crate::input::{Event, Mods, MouseKind};
 use std::io::{Error, Result};
 
 const CAP_POINTER: u32 = 1;
+const CAP_KEYBOARD: u32 = 2;
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
@@ -21,6 +24,11 @@ pub struct Seat {
     last: (i32, i32),
     held: Option<u8>,
     wheel: f64,
+    keyboard: Option<u32>,
+    xkb: Option<Xkb>,
+    mods: Mods,
+    /// why there is no keyboard, when there is none
+    pub keyboard_note: Option<String>,
 }
 
 impl Seat {
@@ -29,11 +37,93 @@ impl Seat {
         let g = find(globals, "wl_seat").ok_or_else(|| Error::other("the compositor has no wl_seat"))?;
         let id = c.new_id();
         c.send(registry, 0, &[Arg::U32(g.name), Arg::Str("wl_seat"), Arg::U32(g.version.min(5)), Arg::New(id)], &[])?;
-        Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0 })
+        Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0, keyboard: None, xkb: None, mods: Mods::NONE, keyboard_note: None })
     }
 
     fn cell_at(&self) -> (i32, i32) {
         ((self.pos.0 / self.cell.0).floor() as i32, (self.pos.1 / self.cell.1).floor() as i32)
+    }
+
+    // capabilities: ask for the pointer once, release it when the seat loses it
+    fn pointer_caps(&mut self, c: &mut Conn, has: bool) -> Result<()> {
+        match (has, self.pointer) {
+            (true, None) => {
+                let p = c.new_id();
+                c.send(self.id, 0, &[Arg::New(p)], &[])?;
+                self.pointer = Some(p);
+            }
+            (false, Some(p)) => {
+                // wl_pointer.release is a destructor since version 3; the seat is bound at 5
+                c.send(p, 1, &[], &[])?;
+                self.pointer = None;
+                self.held = None;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn keyboard_caps(&mut self, c: &mut Conn, has: bool) -> Result<()> {
+        match (has, self.keyboard) {
+            (true, None) => {
+                match Xkb::load() {
+                    Ok(x) => self.xkb = Some(x),
+                    Err(e) => {
+                        self.keyboard_note = Some(e.to_string());
+                        return Ok(());
+                    }
+                }
+                let k = c.new_id();
+                c.send(self.id, 1, &[Arg::New(k)], &[])?;
+                self.keyboard = Some(k);
+            }
+            (false, Some(k)) => {
+                c.send(k, 3, &[], &[])?;
+                self.keyboard = None;
+                self.mods = Mods::NONE;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// keymap(format, fd, size), enter, leave, key(serial, time, key, state), modifiers(serial, dep, lat, locked, group)
+    fn keyboard_event(&mut self, m: &Msg) -> Result<Option<Event>> {
+        let mut r = m.reader();
+        let Some(x) = self.xkb.as_mut() else { return Ok(None) };
+        match m.opcode {
+            0 => {
+                let (format, size) = (r.u32()?, r.u32()? as usize);
+                if format != 1 {
+                    self.keyboard_note = Some(format!("keymap format {format} is not xkb_v1"));
+                    return Ok(None);
+                }
+                let fd = m.fds.first().ok_or_else(|| Error::other("keymap event without a file descriptor"))?;
+                use std::os::fd::AsRawFd;
+                let p = unsafe { libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ, libc::MAP_PRIVATE, fd.as_raw_fd(), 0) };
+                if p == libc::MAP_FAILED {
+                    return Err(Error::last_os_error());
+                }
+                let text = unsafe { std::slice::from_raw_parts(p as *const u8, size) }.to_vec();
+                unsafe { libc::munmap(p, size) };
+                if let Err(e) = x.set_keymap(&text) {
+                    self.keyboard_note = Some(e.to_string());
+                }
+            }
+            2 => self.mods = Mods::NONE,
+            3 => {
+                let (_, _, key, state) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?);
+                if state == 1 {
+                    return Ok(x.key(key, self.mods));
+                }
+            }
+            4 => {
+                let (_, dep, lat, locked, group) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?);
+                self.mods = x.update_mask(dep, lat, locked, group);
+            }
+            _ => {}
+        }
+        Ok(None)
     }
 
     /// Feed one message from the connection; the events it makes, if it was this seat's or its pointer's.
@@ -41,23 +131,16 @@ impl Seat {
         let mut out = Vec::new();
         let mut r = m.reader();
         if m.obj == self.id {
-            // capabilities: ask for the pointer once, release it when the seat loses it
             if m.opcode == 0 {
-                let has = r.u32()? & CAP_POINTER != 0;
-                match (has, self.pointer) {
-                    (true, None) => {
-                        let p = c.new_id();
-                        c.send(self.id, 0, &[Arg::New(p)], &[])?;
-                        self.pointer = Some(p);
-                    }
-                    (false, Some(p)) => {
-                        // wl_pointer.release is a destructor since version 3; the seat is bound at 5
-                        c.send(p, 1, &[], &[])?;
-                        self.pointer = None;
-                        self.held = None;
-                    }
-                    _ => {}
-                }
+                let caps = r.u32()?;
+                self.pointer_caps(c, caps & CAP_POINTER != 0)?;
+                self.keyboard_caps(c, caps & CAP_KEYBOARD != 0)?;
+            }
+            return Ok(out);
+        }
+        if Some(m.obj) == self.keyboard {
+            if let Some(e) = self.keyboard_event(m)? {
+                out.push(e);
             }
             return Ok(out);
         }
@@ -140,7 +223,7 @@ mod tests {
         let mut seat = Seat::bind(&mut c, 2, &g, 10, 20).unwrap();
         let bind = server.read().unwrap();
         assert_eq!((bind.obj, bind.opcode), (2, 0));
-        let caps = Msg { obj: seat.id, opcode: 0, payload: encode(0, 0, &[A::U32(3)])[8..].to_vec(), fds: vec![] };
+        let caps = Msg { obj: seat.id, opcode: 0, payload: encode(0, 0, &[A::U32(1)])[8..].to_vec(), fds: vec![] };
         seat.handle(&mut c, &caps).unwrap();
         let get = server.read().unwrap();
         assert_eq!((get.obj, get.opcode), (seat.id, 0), "get_pointer");
@@ -204,5 +287,82 @@ mod tests {
         let other = Msg { obj: 99, opcode: 3, payload: vec![0; 16], fds: vec![] };
         assert!(s.handle(&mut c, &other).unwrap().is_empty());
         assert!(ev(&mut s, &mut c, 3, &[A::U32(1), A::U32(0), A::U32(0x113), A::U32(1)]).is_empty());
+    }
+
+    #[test]
+    fn a_keymap_from_the_compositor_turns_scancodes_into_keys() {
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+        let Ok(probe) = Xkb::load() else { return };
+        let Ok(text) = probe.default_keymap_text() else { return };
+        if text.is_empty() {
+            return;
+        }
+        drop(probe);
+        let (a, b) = UnixStream::pair().unwrap();
+        let (mut c, mut server) = (Conn::from_stream(a), Conn::from_stream(b));
+        let g = vec![Global { name: 7, interface: "wl_seat".into(), version: 9 }];
+        let mut seat = Seat::bind(&mut c, 1, &g, 10, 20).unwrap();
+        server.read().unwrap();
+        let caps = Msg { obj: seat.id, opcode: 0, payload: encode(0, 0, &[A::U32(2)])[8..].to_vec(), fds: vec![] };
+        seat.handle(&mut c, &caps).unwrap();
+        let get = server.read().unwrap();
+        assert_eq!((get.obj, get.opcode), (seat.id, 1), "get_keyboard");
+        let kb = get.reader().u32().unwrap();
+        // the keymap travels as a file the compositor made
+        let fd = unsafe { libc::memfd_create(c"keymap".as_ptr(), 0) };
+        let mut f = unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
+        f.write_all(&text).unwrap();
+        server.send(kb, 0, &[A::U32(1), A::Fd, A::U32(text.len() as u32)], &[f.as_raw_fd()]).unwrap();
+        let km = c.read().unwrap();
+        assert!(seat.handle(&mut c, &km).unwrap().is_empty());
+        assert_eq!(seat.keyboard_note, None);
+        let key = |seat: &mut Seat, c: &mut Conn, code: u32, state: u32| {
+            let m = Msg { obj: kb, opcode: 3, payload: encode(0, 0, &[A::U32(1), A::U32(0), A::U32(code), A::U32(state)])[8..].to_vec(), fds: vec![] };
+            seat.handle(c, &m).unwrap()
+        };
+        let modifiers = |seat: &mut Seat, c: &mut Conn, dep: u32| {
+            let m = Msg { obj: kb, opcode: 4, payload: encode(0, 0, &[A::U32(1), A::U32(dep), A::U32(0), A::U32(0), A::U32(0)])[8..].to_vec(), fds: vec![] };
+            seat.handle(c, &m).unwrap()
+        };
+        let plain = key(&mut seat, &mut c, 30, 1);
+        assert_eq!(plain.len(), 1, "a press makes one event");
+        assert!(key(&mut seat, &mut c, 30, 0).is_empty(), "a release makes none");
+        if plain == vec![Event::Key(crate::input::Key::Char('a'), Mods::NONE)] {
+            modifiers(&mut seat, &mut c, 1);
+            assert_eq!(key(&mut seat, &mut c, 30, 1), vec![Event::Key(crate::input::Key::Char('A'), Mods::NONE)]);
+            modifiers(&mut seat, &mut c, 4);
+            assert_eq!(key(&mut seat, &mut c, 30, 1), vec![Event::Key(crate::input::Key::Char('a'), Mods::CTRL)]);
+        }
+        // losing the capability releases the keyboard
+        let none = Msg { obj: seat.id, opcode: 0, payload: encode(0, 0, &[A::U32(0)])[8..].to_vec(), fds: vec![] };
+        seat.handle(&mut c, &none).unwrap();
+        let rel = server.read().unwrap();
+        assert_eq!((rel.obj, rel.opcode), (kb, 3));
+    }
+
+    /// Needs a running compositor with a keyboard: binds the seat and reads its capabilities and keymap (two round
+    /// trips), then says whether the compositor's own keymap was accepted. Presses nothing.
+    /// `cargo test --lib wl::seat -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_seat_accepts_the_compositors_keymap() {
+        let mut c = crate::wl::wire::connect().unwrap();
+        let (reg, g) = crate::wl::registry(&mut c).unwrap();
+        let mut seat = Seat::bind(&mut c, reg, &g, 10, 20).unwrap();
+        for _ in 0..2 {
+            let cb = c.new_id();
+            c.send(1, 0, &[A::New(cb)], &[]).unwrap();
+            loop {
+                let m = c.read().unwrap();
+                if m.obj == cb {
+                    break;
+                }
+                seat.handle(&mut c, &m).unwrap();
+            }
+        }
+        println!("pointer {:?}, keyboard {:?}, note {:?}, keymap loaded {:?}", seat.pointer, seat.keyboard, seat.keyboard_note, seat.xkb.as_ref().map(|x| x.has_keymap()));
+        assert_eq!(seat.keyboard_note, None);
+        assert_eq!(seat.xkb.as_ref().map(|x| x.has_keymap()), Some(true));
     }
 }

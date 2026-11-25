@@ -15,6 +15,7 @@ fn main() -> std::io::Result<()> {
         anchor: ANCHOR_BOTTOM | ANCHOR_LEFT,
         size: ((raster.cw * 28) as u32, (raster.ch * 2) as u32),
         exclusive: 0,
+        keyboard: KEYBOARD_ON_DEMAND,
     };
     let mut p = Panel::open(&mut conn, reg, &globals, &spec)?;
     let mut ui = Ui::new(col([text("lazyui in a layer-shell panel"), text("closes in 10 s").dim()]));

@@ -14,6 +14,10 @@ pub const ANCHOR_BOTTOM: u32 = 2;
 pub const ANCHOR_LEFT: u32 = 4;
 pub const ANCHOR_RIGHT: u32 = 8;
 
+pub const KEYBOARD_NONE: u32 = 0;
+pub const KEYBOARD_EXCLUSIVE: u32 = 1;
+pub const KEYBOARD_ON_DEMAND: u32 = 2;
+
 const FORMAT_ARGB8888: u32 = 0;
 
 /// What a message did to the panel.
@@ -33,6 +37,8 @@ pub struct Spec {
     pub size: (u32, u32),
     /// space other windows keep clear of: the height of a top bar, -1 for none
     pub exclusive: i32,
+    /// keyboard focus: `KEYBOARD_NONE`, `KEYBOARD_EXCLUSIVE` (takes every key while shown) or `KEYBOARD_ON_DEMAND` (focus by click)
+    pub keyboard: u32,
 }
 
 pub struct Panel {
@@ -68,6 +74,9 @@ impl Panel {
         c.send(layer_surface, 0, &[Arg::U32(spec.size.0), Arg::U32(spec.size.1)], &[])?;
         c.send(layer_surface, 1, &[Arg::U32(spec.anchor)], &[])?;
         c.send(layer_surface, 2, &[Arg::I32(spec.exclusive)], &[])?;
+        if spec.keyboard != KEYBOARD_NONE {
+            c.send(layer_surface, 4, &[Arg::U32(spec.keyboard)], &[])?;
+        }
         c.send(surface, 6, &[], &[])?;
         loop {
             let m = c.read()?;
@@ -204,7 +213,7 @@ mod tests {
     }
 
     fn spec() -> Spec {
-        Spec { namespace: "bar".into(), layer: LAYER_TOP, anchor: ANCHOR_TOP | ANCHOR_LEFT | ANCHOR_RIGHT, size: (0, 24), exclusive: 24 }
+        Spec { namespace: "bar".into(), layer: LAYER_TOP, anchor: ANCHOR_TOP | ANCHOR_LEFT | ANCHOR_RIGHT, size: (0, 24), exclusive: 24, keyboard: KEYBOARD_NONE }
     }
 
     #[test]
@@ -230,6 +239,29 @@ mod tests {
         assert_eq!(seen, vec![(2, 0), (2, 0), (2, 0), (3, 0), (5, 0), (7, 0), (7, 1), (7, 2), (6, 6)]);
         assert_eq!((ack_obj, ack_op, serial), (7, 6, 77));
         assert_eq!((p.width, p.height), (1920, 24), "the compositor's size wins over the requested 0 x 24");
+    }
+
+    #[test]
+    fn keyboard_interactivity_is_requested_only_when_asked() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let mut c = Conn::from_stream(client);
+        let mut s = Conn::from_stream(server);
+        let t = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for _ in 0..10 {
+                let m = s.read().unwrap();
+                seen.push((m.obj, m.opcode));
+            }
+            let mut w = s;
+            w.send(7, 0, &[Arg::U32(1), Arg::U32(10), Arg::U32(10)], &[]).unwrap();
+            w.read().unwrap(); // ack_configure: the socket must stay open until the client has sent it
+            seen
+        });
+        let registry = c.new_id();
+        Panel::open(&mut c, registry, &globals(), &Spec { keyboard: KEYBOARD_ON_DEMAND, ..spec() }).unwrap();
+        let seen = t.join().unwrap();
+        assert_eq!(seen[8], (7, 4), "set_keyboard_interactivity comes after the exclusive zone, before the commit");
+        assert_eq!(seen[9], (6, 6));
     }
 
     #[test]
@@ -299,7 +331,7 @@ mod tests {
     fn live_panel_shows_for_one_second() {
         let mut c = crate::wl::wire::connect().unwrap();
         let (reg, g) = crate::wl::registry(&mut c).unwrap();
-        let spec = Spec { namespace: "lazyui-test".into(), layer: LAYER_TOP, anchor: ANCHOR_BOTTOM | ANCHOR_LEFT, size: (240, 16), exclusive: 0 };
+        let spec = Spec { namespace: "lazyui-test".into(), layer: LAYER_TOP, anchor: ANCHOR_BOTTOM | ANCHOR_LEFT, size: (240, 16), exclusive: 0, keyboard: KEYBOARD_NONE };
         let mut p = Panel::open(&mut c, reg, &g, &spec).unwrap();
         println!("configured {}x{}", p.width, p.height);
         let frame = vec![0xff1e8c3au32; (p.width * p.height) as usize];
