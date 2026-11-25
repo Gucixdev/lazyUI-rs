@@ -3,13 +3,15 @@
 //! here), Tab and the arrows move between the buttons, enter presses one, a button's first letter presses it, esc
 //! cancels. Pressing emits `activate` (text and index of the button) or `cancel`, and sets KEY back to 0.
 //! `title=`, `text=` (or `from=KEY2`, a model text; `\n` breaks lines), `buttons="Yes,No"`, `default=` index of the
-//! button that starts selected.
+//! button that starts selected. `field=KEY` adds a one-line text field above the buttons, filled from the model text
+//! KEY when the box opens; typing goes to the field, enter presses the selected button, tab moves between field and
+//! buttons' choice, and `activate` then carries the field's text instead of the button's label (the index tells which).
 
 use crate::canvas::{str_width, Canvas, Rect, Style};
 use crate::input::{Event, Key, MouseKind};
 use crate::native::{Cx, Def, EvCx, Widget};
 use crate::ui::Value;
-use crate::widgets::Res;
+use crate::widgets::{Input, Res};
 
 pub static DEFS: &[Def] = &[Def {
     name: "dialog",
@@ -27,11 +29,15 @@ pub struct Dialog {
     was_open: bool,
     /// where each button was drawn, for clicks
     boxes: Vec<Rect>,
+    field: Option<Input>,
 }
 
 impl Dialog {
     fn press(&mut self, i: usize, cx: &mut EvCx) -> Res {
-        let text = self.buttons.get(i).cloned().unwrap_or_default();
+        let text = match &self.field {
+            Some(f) => f.text.clone(),
+            None => self.buttons.get(i).cloned().unwrap_or_default(),
+        };
         self.was_open = false;
         cx.set_bound(Value::Num(0.0));
         cx.emit("activate", &text, i as i64, i as f64);
@@ -72,6 +78,7 @@ impl Widget for Dialog {
         let open = cx.value() != 0.0;
         if open && !self.was_open {
             self.sel = (cx.num_attr("default", 0.0).max(0.0) as usize).min(self.buttons.len() - 1);
+            self.field = cx.attr("field").map(|k| Input::new(&cx.model_text(k).unwrap_or_default()));
         }
         self.was_open = open;
     }
@@ -90,14 +97,18 @@ impl Widget for Dialog {
         let title = cx.text_attr("title", "");
         let inner_w = (buttons_w.max(str_width(&title) + 2).max(30).min((c.w - 4).max(8) as usize)).max(8);
         let lines = wrap(&message, inner_w);
-        let h = (lines.len() as i32 + 4).min(c.h);
+        let extra = i32::from(self.field.is_some());
+        let h = (lines.len() as i32 + 4 + extra).min(c.h);
         let w = inner_w as i32 + 2;
         let rect = Rect::new((c.w - w) / 2, (c.h - h) / 2, w, h);
         let base = Style::fg(t.fg).on(t.bg);
         c.fill(rect, ' ', base);
         c.border(rect, &title, t.accent_style(), t.accent_style());
-        for (i, line) in lines.iter().take((h - 4).max(0) as usize).enumerate() {
+        for (i, line) in lines.iter().take((h - 4 - extra).max(0) as usize).enumerate() {
             c.text_fit(rect.x + 1, rect.y + 1 + i as i32, inner_w as i32, line, base);
+        }
+        if let Some(f) = self.field.as_mut() {
+            f.draw(c, Rect::new(rect.x + 1, rect.y + rect.h - 3, inner_w as i32, 1), "> ", &t, true);
         }
         let mut x = rect.x + 1 + ((inner_w - buttons_w.min(inner_w)) / 2) as i32;
         let y = rect.y + rect.h - 2;
@@ -134,11 +145,19 @@ impl Widget for Dialog {
         }
         let n = self.buttons.len().max(1);
         match ev {
-            Event::Key(Key::Left | Key::BackTab, _) => {
+            Event::Key(Key::BackTab, _) => {
                 self.sel = (self.sel + n - 1) % n;
                 Res::Handled
             }
-            Event::Key(Key::Right | Key::Tab, _) => {
+            Event::Key(Key::Tab, _) => {
+                self.sel = (self.sel + 1) % n;
+                Res::Handled
+            }
+            Event::Key(Key::Left, _) if self.field.is_none() => {
+                self.sel = (self.sel + n - 1) % n;
+                Res::Handled
+            }
+            Event::Key(Key::Right, _) if self.field.is_none() => {
                 self.sel = (self.sel + 1) % n;
                 Res::Handled
             }
@@ -147,6 +166,13 @@ impl Widget for Dialog {
                 self.press(i, cx)
             }
             Event::Key(Key::Esc, _) => self.act("cancel", "", cx),
+            _ if self.field.is_some() && !matches!(ev, Event::Mouse(..)) => {
+                let r = Rect::new(0, 0, 1000, 1);
+                match self.field.as_mut().map(|f| f.event(r, 0, ev)) {
+                    Some(Res::Ignored) | None => Res::Handled,
+                    Some(res) => res,
+                }
+            }
             Event::Key(Key::Char(ch), m) if !m.ctrl && !m.alt => {
                 match self.buttons.iter().position(|b| b.chars().next().is_some_and(|f| f.to_lowercase().eq(ch.to_lowercase()))) {
                     Some(i) => self.press(i, cx),
@@ -166,6 +192,20 @@ impl Widget for Dialog {
 mod tests {
     use crate::headless::{run_script, snapshot};
     use crate::ui::Ui;
+
+    #[test]
+    fn a_field_takes_typing_and_activate_carries_its_text() {
+        let mut ui = Ui::from_spec("col\n  text id=t text=back size=1\n  dialog id=d bind=ask title=Rename field=name buttons=\"OK,Cancel\"\n").unwrap();
+        run_script(&mut ui, "size 40 10\nset name=old.txt\nset ask=1").unwrap();
+        let s = snapshot(&mut ui, 40, 10);
+        assert!(s.contains("> old.txt"), "{s}");
+        run_script(&mut ui, "key backspace backspace backspace\ntype rs\nkey left\ntype X").unwrap();
+        assert!(snapshot(&mut ui, 40, 10).contains("> old.rXs"), "{}", snapshot(&mut ui, 40, 10));
+        run_script(&mut ui, "key enter").unwrap();
+        run_script(&mut ui, "expect event d activate old.rXs").unwrap();
+        assert_eq!(ui.number("ask"), 0.0);
+        run_script(&mut ui, "set ask=1\nkey esc\nexpect event d cancel").unwrap();
+    }
 
     #[test]
     fn a_word_wider_than_the_line_is_cut_at_the_width() {

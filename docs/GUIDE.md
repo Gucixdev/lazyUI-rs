@@ -48,6 +48,8 @@ Hooks: `hook=NAME` on an element sends every event it raises to a running finede
 
 Menu bar: `menubar menus="File=Open,-,Recent>a|b,~Quit;Edit=Copy"` (`;` between menus, `=` after the title, `,` between entries, `>` opens a sub-menu whose entries split on `|`, `-` separator, `~` greyed). A pick emits `activate` with the path `File/Recent/a`.
 
+Dialog: `dialog bind=ask title=Delete text="Really?" buttons="Yes,No" default=1` is modal while `ask` is not 0; `activate` carries the button's label and index, `cancel` comes on esc, and `ask` goes back to 0. `from=KEY2` takes the message from a model text. `field=KEY` adds a text field filled from KEY (a rename box); then `activate` carries the typed text and the index says which button.
+
 Floating window: `floatwin bind=show title=Props from=info image=thumb w=40 h=12` is open while `show` is not 0; it floats over the UI without taking it over (a click focuses it, the title bar drags it, `x` or esc closes it and emits `close`). Put it last in the spec so it is on top.
 
 Gamepad (native window and panel loop): evdev gamepads with a south button are read from `/dev/input/event*` (needs read access, usually the `input` group) and become keys: d-pad and left stick = arrows with repeat, A = enter, B = esc, X = space, Y = `f`, shoulders = tab / shift-tab, start = ctrl-q. No device or no permission is silently no pad; a pad plugged in later is found within 5 s.
