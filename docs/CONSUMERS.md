@@ -19,7 +19,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `tabs` | has: `pages` |
 | `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); `menubar` (titles, drop-downs, one level of sub-menus, keys and mouse, `activate` carries `File/Recent/a`) |
-| `tooltip` | has: `tip="text"` on any element (half a second of rest, one line; multi-line is a gap) |
+| `tooltip` | has: `tip="text"` on any element (half a second of rest, `\n` breaks lines, long text wraps at 40 cells) |
 | `dialog_frame`, overlays | has: `dialog` (modal, keys and clicks belong to it while `bind=KEY` is not 0; buttons, default, first-letter keys, esc cancels); a non-modal floating window is a gap |
 | `text_input` | has: `searchbar`; `pathbar` (Tab completion on the file system or from the host, `~/`, directories first, popup) |
 | `progress` | has: `progressbar` |

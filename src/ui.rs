@@ -1285,12 +1285,18 @@ impl Ui {
 
     fn draw_tip(&self, c: &mut Canvas) {
         let Some(t) = self.tip.as_ref().filter(|t| t.shown) else { return };
-        let w = (crate::canvas::str_width(&t.text) as i32 + 2).min(c.w);
+        // `\n` (or a real newline) breaks lines, long lines wrap at 40 cells or the screen
+        let lines = crate::dialog::wrap(&t.text, (c.w - 2).clamp(1, 40) as usize);
+        let inner = lines.iter().map(|l| crate::canvas::str_width(l) as i32).max().unwrap_or(0);
+        let w = (inner + 2).min(c.w);
+        let h = (lines.len() as i32).min(c.h);
         let x = (t.at.0 + 1).min(c.w - w).max(0);
-        let y = if t.at.1 + 2 < c.h { t.at.1 + 1 } else { (t.at.1 - 1).max(0) };
+        let y = if t.at.1 + 1 + h < c.h { t.at.1 + 1 } else { (t.at.1 - h).max(0) };
         let st = Style::fg(self.theme.fg).on(crate::gfx::mix(self.theme.bg, self.theme.dim, 0.4));
-        c.fill(Rect::new(x, y, w, 1), ' ', st);
-        c.text_fit(x + 1, y, w - 2, &t.text, st);
+        for (i, line) in lines.iter().take(h as usize).enumerate() {
+            c.fill(Rect::new(x, y + i as i32, w, 1), ' ', st);
+            c.text_fit(x + 1, y + i as i32, w - 2, line, st);
+        }
     }
 
     fn draw_drag(&self, c: &mut Canvas) {
@@ -2054,5 +2060,21 @@ col
         run_script(&mut ui, "click 2 0").unwrap();
         assert!(!snapshot(&mut ui, 30, 5).contains("first one"), "a press hides it");
         assert!(ui.next_deadline().is_none());
+    }
+
+    #[test]
+    fn a_long_tip_wraps_and_a_backslash_n_breaks_lines() {
+        use crate::headless::{run_script, snapshot};
+        let mut ui = Ui::from_spec("col\n  text id=a text=alpha tip=\"first line\\nsecond line\" size=1\n  spacer\n").unwrap();
+        run_script(&mut ui, "size 30 6\nmove 2 0\ntick 0.6").unwrap();
+        let s = snapshot(&mut ui, 30, 6);
+        let rows: Vec<&str> = s.lines().collect();
+        assert!(rows[1].contains("first line") && rows[2].contains("second line"), "{s}");
+        let long = "word ".repeat(30);
+        let mut ui = Ui::from_spec(&format!("col\n  text id=a text=alpha tip=\"{long}\" size=1\n  spacer\n")).unwrap();
+        run_script(&mut ui, "size 60 8\nmove 2 0\ntick 0.6").unwrap();
+        let s = snapshot(&mut ui, 60, 8);
+        assert!(s.lines().filter(|l| l.contains("word")).count() >= 3, "wrapped over several rows:\n{s}");
+        assert!(s.lines().all(|l| l.trim_end().len() <= 45), "never wider than ~40 cells:\n{s}");
     }
 }
