@@ -90,6 +90,9 @@ pub struct List {
     filter: String,
     shown: Vec<usize>,
     lazy: Option<Lazy>,
+    /// `multi`: space, ctrl-click and ctrl-a mark rows; the marks are indices into `items`
+    pub multi: bool,
+    marks: std::collections::BTreeSet<usize>,
 }
 
 /// A list whose rows live elsewhere (a file, a database, a socket): it knows how many there are and keeps only the rows it
@@ -210,7 +213,22 @@ impl List {
         l.refilter();
         l
     }
+    /// Marked rows as indices into `items`, ascending.
+    pub fn marks(&self) -> Vec<usize> {
+        self.marks.iter().copied().collect()
+    }
+    pub fn clear_marks(&mut self) {
+        self.marks.clear();
+    }
+    fn toggle(&mut self, pos: usize) {
+        if let Some(&i) = self.shown.get(pos) {
+            if !self.marks.remove(&i) {
+                self.marks.insert(i);
+            }
+        }
+    }
     pub fn set_items(&mut self, items: Vec<String>) {
+        self.marks.clear();
         self.items = items;
         self.refilter();
     }
@@ -298,6 +316,9 @@ impl List {
             if sel {
                 c.put(r.x, y, g.pointer, st);
             }
+            if self.lazy.is_none() && self.shown.get(pos).is_some_and(|i| self.marks.contains(i)) {
+                c.put(r.x + 1, y, '*', Style::fg(t.accent).on(st.bg).with(BOLD));
+            }
             match self.row(pos) {
                 Some(text) => {
                     // a tab splits a row into a left part and one aligned to the right edge (a name and its size)
@@ -347,6 +368,27 @@ impl List {
             Event::Key(Key::Home, _) => moved(self, 0),
             Event::Key(Key::End, _) => moved(self, n.saturating_sub(1)),
             Event::Key(Key::Enter, _) if n > 0 => Res::Activate,
+            Event::Key(Key::Char(' '), m) if self.multi && !m.ctrl && n > 0 => {
+                self.toggle(self.cursor);
+                self.cursor = (self.cursor + 1).min(n - 1);
+                Res::Changed
+            }
+            Event::Key(Key::Char('a'), m) if self.multi && m.ctrl => {
+                if self.marks.len() == self.shown.len() {
+                    self.marks.clear();
+                } else {
+                    self.marks = self.shown.iter().copied().collect();
+                }
+                Res::Changed
+            }
+            Event::Mouse(MouseKind::Down(0), x, y, m) if self.multi && m.ctrl && r.contains(*x, *y) => {
+                let pos = self.top + (*y - r.y) as usize;
+                if pos < n {
+                    self.toggle(pos);
+                    self.cursor = pos;
+                }
+                Res::Changed
+            }
             Event::Mouse(MouseKind::WheelUp, x, y, _) if r.contains(*x, *y) => {
                 self.top = self.top.saturating_sub(3);
                 Res::Handled

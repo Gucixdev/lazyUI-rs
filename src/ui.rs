@@ -597,6 +597,19 @@ impl Ui {
             self.dirty = true;
         }
     }
+    /// The rows marked in a `list multi` (space, ctrl-click, ctrl-a), as indices into its items.
+    pub fn list_marks(&self, id: &str) -> Vec<usize> {
+        match self.states.get(id) {
+            Some(WState::List(l, _)) => l.marks(),
+            _ => Vec::new(),
+        }
+    }
+    pub fn clear_list_marks(&mut self, id: &str) {
+        if let Some(WState::List(l, _)) = self.states.get_mut(id) {
+            l.clear_marks();
+        }
+    }
+
     pub fn list_selected(&self, id: &str) -> Option<usize> {
         match self.states.get(id) {
             Some(WState::List(l, _)) => l.selected(),
@@ -1014,6 +1027,7 @@ impl Ui {
                     if let Some(f) = filter {
                         l.set_filter(&f);
                     }
+                    l.multi = matches!(el.attr("multi"), Some("1" | "true" | "yes" | "on"));
                     l.draw(c, r, &t, focused);
                 }
             }
@@ -2081,5 +2095,29 @@ col
         let s = snapshot(&mut ui, 60, 8);
         assert!(s.lines().filter(|l| l.contains("word")).count() >= 3, "wrapped over several rows:\n{s}");
         assert!(s.lines().all(|l| l.trim_end().len() <= 45), "never wider than ~40 cells:\n{s}");
+    }
+
+    #[test]
+    fn a_multi_list_marks_with_space_ctrl_click_and_ctrl_a() {
+        use crate::headless::{run_script, snapshot};
+        let mut ui = Ui::from_spec("col\n  list id=l items=\"a,b,c,d\" multi=1 size=fill\n").unwrap();
+        run_script(&mut ui, "size 20 6\nfocus l").unwrap();
+        run_script(&mut ui, "key space space").unwrap();
+        assert_eq!(ui.list_marks("l"), vec![0, 1]);
+        assert_eq!(ui.list_selected("l"), Some(2), "space moves on");
+        let s = snapshot(&mut ui, 20, 6);
+        assert!(s.lines().next().unwrap().contains('*') && s.lines().nth(2).unwrap().trim_start_matches(['>', ' ', '\u{25b6}']).starts_with('c'), "{s}");
+        run_script(&mut ui, "key space").unwrap();
+        run_script(&mut ui, "key ctrl-a").unwrap();
+        assert_eq!(ui.list_marks("l"), vec![0, 1, 2, 3] , "all marked");
+        run_script(&mut ui, "key ctrl-a").unwrap();
+        assert!(ui.list_marks("l").is_empty(), "ctrl-a again clears");
+        ui.set_list("l", vec!["x".into(), "y".into()]);
+        run_script(&mut ui, "key space").unwrap();
+        ui.set_list("l", vec!["x".into()]);
+        assert!(ui.list_marks("l").is_empty(), "new rows, no marks");
+        let mut plain = Ui::from_spec("col\n  list id=l items=\"a,b\" size=fill\n").unwrap();
+        run_script(&mut plain, "size 20 4\nfocus l\nkey space").unwrap();
+        assert!(plain.list_marks("l").is_empty(), "without multi space does nothing");
     }
 }
