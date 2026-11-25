@@ -190,7 +190,7 @@ pub struct Def {
     pub make: fn() -> Box<dyn Widget>,
 }
 
-const TABLES: [&[Def]; 15] = [crate::charts::DEFS, crate::lists::DEFS, crate::menu::DEFS, crate::menubar::DEFS, crate::splitter::DEFS, crate::dialog::DEFS, crate::media::DEFS, crate::grid::DEFS, crate::pathbar::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS, crate::fancy::DEFS, crate::bars::DEFS, crate::pickers::DEFS];
+const TABLES: [&[Def]; 16] = [crate::floatwin::DEFS, crate::charts::DEFS, crate::lists::DEFS, crate::menu::DEFS, crate::menubar::DEFS, crate::splitter::DEFS, crate::dialog::DEFS, crate::media::DEFS, crate::grid::DEFS, crate::pathbar::DEFS, crate::timers::DEFS, crate::sys::DEFS, crate::maps::DEFS, crate::fancy::DEFS, crate::bars::DEFS, crate::pickers::DEFS];
 
 pub fn find(name: &str) -> Option<&'static Def> {
     all().find(|d| d.name == name)

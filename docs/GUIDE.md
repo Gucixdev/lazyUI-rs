@@ -48,6 +48,8 @@ Hooks: `hook=NAME` on an element sends every event it raises to a running finede
 
 Menu bar: `menubar menus="File=Open,-,Recent>a|b,~Quit;Edit=Copy"` (`;` between menus, `=` after the title, `,` between entries, `>` opens a sub-menu whose entries split on `|`, `-` separator, `~` greyed). A pick emits `activate` with the path `File/Recent/a`.
 
+Floating window: `floatwin bind=show title=Props from=info image=thumb w=40 h=12` is open while `show` is not 0; it floats over the UI without taking it over (a click focuses it, the title bar drags it, `x` or esc closes it and emits `close`). Put it last in the spec so it is on top.
+
 Tooltip: `tip="text"` on any element; it appears next to the pointer after it rests on the element for half a second, and goes when the pointer leaves or a button is pressed.
 
 ## As a library

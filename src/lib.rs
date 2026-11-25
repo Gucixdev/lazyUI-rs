@@ -16,6 +16,7 @@ pub mod input;
 pub mod layout;
 pub mod lists;
 pub mod media;
+pub mod floatwin;
 pub mod menu;
 pub mod menubar;
 pub mod pathbar;

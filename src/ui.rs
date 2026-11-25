@@ -1045,7 +1045,7 @@ impl Ui {
     }
 
     fn cycle_focus(&mut self, back: bool) {
-        let ids: Vec<String> = self.placed.iter().filter(|p| p.kind.focusable() && (p.kind != Kind::Custom("dialog") || self.dialog_is_open(*p))).map(|p| p.id().to_string()).collect();
+        let ids: Vec<String> = self.placed.iter().filter(|p| p.kind.focusable() && (!matches!(p.kind, Kind::Custom("dialog" | "floatwin")) || self.dialog_is_open(*p))).map(|p| p.id().to_string()).collect();
         if ids.is_empty() {
             return;
         }
