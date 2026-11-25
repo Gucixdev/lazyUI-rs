@@ -1,4 +1,4 @@
-//! `grid`: a virtual grid of tiles, each a picture with a label under it (a folder of thumbnails). `count=N` tiles of
+//! `grid`: a virtual grid of tiles, each a picture with a label under it (a folder of thumbnails). `count=N` (or `count=@KEY`, read from the model every frame) tiles of
 //! `tile=WxH` cells (the last row of a tile is its label). Only the tiles in view are drawn, so a million is as cheap
 //! as ten. Tile `i` shows the picture registered under `{prefix}{i}` (`Ui::set_image`) and the model text `{prefix}{i}`
 //! as its label (the number when there is none). While the view moves, a `need` event asks for what is about to be
@@ -85,7 +85,12 @@ impl Grid {
 
 impl Widget for Grid {
     fn draw(&mut self, c: &mut Canvas, r: Rect, cx: &Cx) {
-        self.count = cx.num_attr("count", 0.0).max(0.0) as usize;
+        // `count=N`, or `count=@KEY` to follow a model key (a folder that changes)
+        self.count = match cx.attr("count").and_then(|v| v.strip_prefix('@')) {
+            Some(k) => cx.model_num(k).unwrap_or(0.0),
+            None => cx.num_attr("count", 0.0),
+        }
+        .max(0.0) as usize;
         self.tile = tile_size(cx.attr("tile"));
         self.prefix = cx.text_attr("prefix", "t");
         self.area = r;
@@ -182,6 +187,15 @@ mod tests {
         assert_eq!((need.len(), need[0].index, need[0].number), (1, 0, 12.0), "two rows in view plus one ahead, 4 per row");
         run_script(&mut ui, "size 32 8\ntick 0.1").unwrap();
         assert!(ui.take_events().iter().all(|e| e.kind != "need"), "not asked twice");
+    }
+
+    #[test]
+    fn count_can_follow_a_model_key() {
+        let mut ui = Ui::from_spec("col\n  grid id=g count=@n tile=8x4 prefix=t\n").unwrap();
+        run_script(&mut ui, "size 32 8\nset n=0").unwrap();
+        assert!(!snapshot(&mut ui, 32, 8).contains("..."));
+        run_script(&mut ui, "size 32 8\nset n=3").unwrap();
+        assert_eq!(snapshot(&mut ui, 32, 8).matches("...").count(), 3);
     }
 
     #[test]

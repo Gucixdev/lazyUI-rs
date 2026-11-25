@@ -504,6 +504,9 @@ impl Ui {
         self.images.insert(key.to_string(), std::sync::Arc::new(img));
         self.dirty = true;
     }
+    pub fn has_image(&self, key: &str) -> bool {
+        self.images.contains_key(key)
+    }
     pub fn remove_image(&mut self, key: &str) {
         if self.images.remove(key).is_some() {
             self.dirty = true;
