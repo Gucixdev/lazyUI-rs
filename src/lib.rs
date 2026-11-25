@@ -13,6 +13,7 @@ pub mod i18n;
 pub mod input;
 pub mod layout;
 pub mod lists;
+pub mod menu;
 pub mod native;
 pub mod plan;
 pub mod prelude;

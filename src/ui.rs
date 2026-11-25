@@ -1020,6 +1020,10 @@ impl Ui {
                     }
                     None => {
                         if matches!(kind, MouseKind::Down(0)) {
+                            // the focused widget hears a press outside itself, so an open popup can close
+                            if let Some(id) = self.focus.clone() {
+                                self.widget_event(&id, ev);
+                            }
                             let hit = self.placed.iter().rev().find(|p| p.rect.contains(*x, *y) && !p.id().contains('@')).map(|p| p.id().to_string());
                             if let Some(id) = hit {
                                 self.emit(&id, "click", "", 0.0);

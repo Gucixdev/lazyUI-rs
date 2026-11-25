@@ -18,18 +18,18 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `virt` (virtual list/grid) | check: `list`, `table`; grid view of thumbnails is a gap |
 | `tabs` | has: `pages` |
 | `split` + `drag_frac` (draggable divider) | check: `layout::split` is fixed; draggable divider is a gap |
-| `menu`, context menu | gap: only `dropdown` |
+| `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); a menu bar with sub-menus is a gap |
 | `tooltip` | gap |
 | `dialog_frame`, overlays | gap |
 | `text_input` | has: `searchbar`; path bar with completion is a gap |
 | `progress` | has: `progressbar` |
 | `icon`, `icon_button`, thumbnails, images | gap: media layer (PNG/JPEG/WebP, icon themes) |
-| drag and drop between panes and out | gap: in progress |
+| drag and drop between panes and out | check: `drag=`/`drop=` attributes and reorder exist (`dnd`); a drop out to other programs is a gap |
 | live-reloaded theme file | check |
 | DPI scale | check |
 | editable key bindings | has: BINDINGS.md |
 
-Order of work: media layer, drag and drop, menus and dialogs, draggable split, tooltip, thumbnail grid.
+Order of work: media layer, drag and drop, dialogs (menus done), draggable split, tooltip, thumbnail grid.
 
 ## The split
 

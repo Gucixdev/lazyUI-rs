@@ -105,6 +105,12 @@ pub fn run_script(ui: &mut Ui, script: &str) -> Result<String, String> {
                 ui.dispatch(&Event::Mouse(MouseKind::Down(0), x, y, Mods::NONE));
                 ui.dispatch(&Event::Mouse(MouseKind::Up(0), x, y, Mods::NONE));
             }
+            "rclick" => {
+                let (x, y) = two_ints(&args).ok_or_else(|| fail("rclick X Y".into()))?;
+                relayout_if_needed(ui, w, h);
+                ui.dispatch(&Event::Mouse(MouseKind::Down(2), x, y, Mods::NONE));
+                ui.dispatch(&Event::Mouse(MouseKind::Up(2), x, y, Mods::NONE));
+            }
             "drag" => {
                 let n: Vec<i32> = args.iter().filter_map(|a| a.parse().ok()).collect();
                 let [x1, y1, x2, y2] = n[..] else { return Err(fail("drag X1 Y1 X2 Y2".into())) };
