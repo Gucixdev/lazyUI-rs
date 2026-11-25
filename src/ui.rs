@@ -377,6 +377,8 @@ pub struct Ui {
     states: HashMap<String, WState>,
     springs: HashMap<String, Spring>,
     focus: Option<String>,
+    /// a `focus()` for a widget that is on a page not shown yet: taken up at the next layout
+    want_focus: Option<String>,
     /// the widget a left press landed on: it hears the drag and the release wherever the pointer goes
     grab: Option<String>,
     tip: Option<Tip>,
@@ -413,6 +415,7 @@ impl Ui {
             tip: None,
             springs: HashMap::new(),
             focus: None,
+            want_focus: None,
             placed: Plan::default(),
             stacks: Stacks::default(),
             size: (0, 0),
@@ -684,9 +687,11 @@ impl Ui {
     pub fn focus(&mut self, id: &str) -> bool {
         if self.placed.iter().any(|p| p.kind.focusable() && p.id() == id) {
             self.focus = Some(id.to_string());
+            self.want_focus = None;
             self.dirty = true;
             true
         } else {
+            self.want_focus = Some(id.to_string());
             false
         }
     }
@@ -855,6 +860,11 @@ impl Ui {
             self.laid = Some(((w, h), self.gen));
         }
         self.size = (w, h);
+        if let Some(w) = self.want_focus.take() {
+            if self.placed.iter().any(|p| p.kind.focusable() && p.id() == w) {
+                self.focus = Some(w);
+            }
+        }
         // focus must point at something that exists
         let ok = self.focus.as_ref().map(|f| self.placed.iter().any(|p| p.kind.focusable() && &p.id() == f)).unwrap_or(false);
         if !ok {
@@ -2111,6 +2121,18 @@ col
         ui.set_text("names", "only");
         let s = snapshot(&mut ui, 30, 2);
         assert!(s.contains("only") && !s.contains("docs"), "{s}");
+    }
+
+    #[test]
+    fn focus_asked_for_a_widget_on_a_hidden_page_lands_when_the_page_shows() {
+        let mut ui = Ui::from_spec("pages bind=view\n  list id=a\n  list id=b\n").unwrap();
+        ui.set_list("a", vec!["x".into()]);
+        ui.set_list("b", vec!["y".into()]);
+        crate::headless::snapshot(&mut ui, 20, 5);
+        assert!(!ui.focus("b"), "b is not placed yet");
+        ui.set("view", 1.0);
+        crate::headless::snapshot(&mut ui, 20, 5);
+        assert_eq!(ui.focused(), Some("b"));
     }
 
     #[test]
