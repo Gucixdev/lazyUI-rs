@@ -38,3 +38,7 @@ pollster = { version = "0.4", optional = true }
 [profile.release]
 opt-level = 3
 lto = true
+
+[[example]]
+name = "panel"
+required-features = ["gui"]
