@@ -50,7 +50,13 @@ pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
             if !cur.is_empty() {
                 cur.push(' ');
             }
-            cur.push_str(word);
+            // a word wider than the line (a path) is cut at the width instead of being hidden by the clip
+            for ch in word.chars() {
+                if str_width(&cur) + crate::canvas::str_width(ch.encode_utf8(&mut [0; 4])) > width.max(1) {
+                    out.push(std::mem::take(&mut cur));
+                }
+                cur.push(ch);
+            }
         }
         out.push(cur);
     }
@@ -160,6 +166,13 @@ impl Widget for Dialog {
 mod tests {
     use crate::headless::{run_script, snapshot};
     use crate::ui::Ui;
+
+    #[test]
+    fn a_word_wider_than_the_line_is_cut_at_the_width() {
+        assert_eq!(super::wrap("path: /aaaa/bbbb/cccc", 8), vec!["path:", "/aaaa/bb", "bb/cccc"]);
+        assert_eq!(super::wrap("short words fit", 20), vec!["short words fit"]);
+        assert_eq!(super::wrap("a\\nb", 5), vec!["a", "b"]);
+    }
 
     const SPEC: &str = "col\n  text text=background size=1\n  searchbar id=q\n  dialog id=d bind=ask title=\"Delete\" text=\"Really delete 3 files?\" buttons=\"Yes,No\" default=1\n";
 
