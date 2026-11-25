@@ -220,3 +220,30 @@ mod tests {
         run_script(&mut ui, "size 32 8\nclick 31 7\nexpect model cur 7").unwrap();
     }
 }
+
+#[cfg(test)]
+mod timing {
+    use crate::canvas::{Caps, Canvas};
+    use crate::ui::Ui;
+    use std::time::Instant;
+
+    /// A folder of 100k entries: a frame must cost the visible tiles, not the folder. `cargo test --release grid::timing -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_frame_of_a_100k_folder() {
+        let mut ui = Ui::from_spec("col\n  grid id=g count=100000 tile=14x7 prefix=t bind=cur\n").unwrap();
+        for i in 0..100_000 {
+            ui.set_text(&format!("t{i}"), &format!("file-{i}.jpg"));
+        }
+        let mut c = Canvas::new(200, 60, Caps::FULL);
+        let t = Instant::now();
+        ui.render(&mut c);
+        let first = t.elapsed();
+        let t = Instant::now();
+        for i in 0..100 {
+            ui.set_text("cur", &format!("{}", i * 900));
+            ui.render(&mut c);
+        }
+        println!("first frame {first:?}, 100 scrolled frames {:?}", t.elapsed());
+    }
+}

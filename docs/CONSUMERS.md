@@ -15,7 +15,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 
 | fm8-ui | lazyUI |
 |---|---|
-| `virt` (virtual list/grid) | has: `grid` (virtual tiles with pictures and labels, `need` events for the tiles about to show; a million tiles tested for the logic, not timed); check: `list`, `table` with 100k real entries |
+| `virt` (virtual list/grid) | has: `grid` (virtual tiles with pictures and labels, `need` events for the tiles about to show; 100k tiles: first frame 0.18 ms, scrolled frames 0.18 ms each in release, `cargo test --release grid::timing -- --ignored --nocapture`; pictures and disk not included); check: `list`, `table` with 100k real entries |
 | `tabs` | has: `pages` |
 | `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); a menu bar with sub-menus is a gap |
@@ -29,7 +29,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | DPI scale | has: the native window follows `wl_output.scale` of the outputs it is on (`set_buffer_scale`, font and pointer cells rescaled); fractional scales and the winit window's own `ScaleFactorChanged` are separate; not seen on a real 2x output |
 | editable key bindings | has: BINDINGS.md |
 
-Left before filem8 can move: decoding and icon themes (a codec crate shared with fm8-codec), timing a real 100k folder, a non-modal floating window, a drop out to other programs; question in claude-config/questions.md.
+Left before filem8 can move: decoding and icon themes (a codec crate shared with fm8-codec), real icons and thumbnails from a slow disk, a non-modal floating window, a drop out to other programs; question in claude-config/questions.md.
 
 ## The split
 
