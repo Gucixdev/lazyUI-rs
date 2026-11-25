@@ -33,6 +33,13 @@ pub struct Dialog {
 }
 
 impl Dialog {
+    /// The state a freshly opened box starts in: the default button selected and the field filled.
+    fn opened(&mut self, default: f64, field: Option<String>) {
+        self.sel = (default.max(0.0) as usize).min(self.buttons.len().saturating_sub(1));
+        self.field = field.map(|t| Input::new(&t));
+        self.was_open = true;
+    }
+
     fn press(&mut self, i: usize, cx: &mut EvCx) -> Res {
         let text = match &self.field {
             Some(f) => f.text.clone(),
@@ -77,8 +84,8 @@ impl Widget for Dialog {
         }
         let open = cx.value() != 0.0;
         if open && !self.was_open {
-            self.sel = (cx.num_attr("default", 0.0).max(0.0) as usize).min(self.buttons.len() - 1);
-            self.field = cx.attr("field").map(|k| Input::new(&cx.model_text(k).unwrap_or_default()));
+            let field = cx.attr("field").map(|k| cx.model_text(k).unwrap_or_default());
+            self.opened(cx.num_attr("default", 0.0), field);
         }
         self.was_open = open;
     }
@@ -143,6 +150,15 @@ impl Widget for Dialog {
         if cx.attr("bind").and_then(|k| cx.model_num(k)).unwrap_or(0.0) == 0.0 {
             return Res::Ignored;
         }
+        if !self.was_open {
+            // opened and answered before the next draw: start the same way a draw would have
+            if self.buttons.is_empty() {
+                self.buttons = cx.attr("buttons").filter(|b| !b.is_empty()).map(|b| b.split(',').map(|x| x.trim().to_string()).collect()).unwrap_or_else(|| vec!["OK".to_string()]);
+            }
+            let field = cx.attr("field").map(|k| cx.model_text(k).unwrap_or_default());
+            let default = cx.attr("default").and_then(|d| d.parse().ok()).unwrap_or(0.0);
+            self.opened(default, field);
+        }
         let n = self.buttons.len().max(1);
         match ev {
             Event::Key(Key::BackTab, _) => {
@@ -205,6 +221,14 @@ mod tests {
         run_script(&mut ui, "expect event d activate old.rXs").unwrap();
         assert_eq!(ui.number("ask"), 0.0);
         run_script(&mut ui, "set ask=1\nkey esc\nexpect event d cancel").unwrap();
+    }
+
+    #[test]
+    fn answering_before_any_draw_still_sees_the_field() {
+        let mut ui = Ui::from_spec("col\n  text id=t text=back size=1\n  dialog id=d bind=ask field=name buttons=\"OK,Cancel\"\n").unwrap();
+        run_script(&mut ui, "size 40 10\nset name=old.txt").unwrap();
+        ui.set("ask", 1.0);
+        run_script(&mut ui, "key enter\nexpect event d activate old.txt").unwrap();
     }
 
     #[test]
