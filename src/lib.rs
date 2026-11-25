@@ -25,6 +25,8 @@ pub mod term;
 pub mod ui;
 #[cfg(feature = "web")]
 pub mod web;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wl;
 pub mod fx;
 pub mod widgets;
 
