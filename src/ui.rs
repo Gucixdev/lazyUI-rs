@@ -809,7 +809,12 @@ impl Ui {
                 Some(v) => Size::parse(v),
                 None => None,
             };
-            size.unwrap_or_else(|| if c.kind == Kind::Custom("splitter") { Size::Fixed(1) } else { Ui::default_size(c.kind, dir == Dir::Col) })
+            size.unwrap_or_else(|| match c.kind {
+                Kind::Custom("splitter") => Size::Fixed(1),
+                // overlays draw on the whole canvas, so they take no room in the layout
+                Kind::Custom("dialog" | "floatwin") => Size::Fixed(0),
+                _ => Ui::default_size(c.kind, dir == Dir::Col),
+            })
         }));
         {
             let Stacks { sizes, rects, scratch } = &mut *st;

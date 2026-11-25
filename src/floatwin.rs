@@ -177,6 +177,15 @@ mod tests {
     use crate::headless::{run_script, snapshot};
     use crate::ui::Ui;
 
+    #[test]
+    fn an_overlay_takes_no_room_in_the_column() {
+        use crate::headless::{run_script, snapshot};
+        let mut ui = Ui::from_spec("col\n  list id=l items=\"one\" \n  text id=s text=status size=1\n  floatwin id=f bind=show title=P w=20 h=6\n  dialog id=d bind=ask title=D text=x buttons=\"Ok\"\n").unwrap();
+        run_script(&mut ui, "size 30 10").unwrap();
+        let s = snapshot(&mut ui, 30, 10);
+        assert_eq!(s.lines().nth(9).map(str::trim_end), Some("status"), "the status line is on the last row:\n{s}");
+    }
+
     const SPEC: &str = "col\n  list id=l items=\"one,two,three\" size=fill\n  floatwin id=f bind=show title=Props from=info w=20 h=6 x=2 y=1\n";
 
     fn rows(s: &str) -> Vec<&str> {
