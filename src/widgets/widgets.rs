@@ -462,6 +462,10 @@ impl Input {
                 break;
             }
         }
+        // text that got shorter must not stay scrolled out of sight: show as much of it as fits
+        while self.scroll > 0 && self.text.chars().skip(self.scroll - 1).map(char_width).sum::<usize>() < avail {
+            self.scroll -= 1;
+        }
         let mut x = r.x + pw;
         for ch in self.text.chars().skip(self.scroll) {
             if x >= r.x + r.w {
@@ -693,6 +697,19 @@ pub fn draw_keybar(c: &mut Canvas, r: Rect, hints: &[(String, String)], t: &Them
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_input_that_gets_shorter_shows_its_text_again() {
+        let t = Theme::green();
+        let mut c = Canvas::new(20, 1, Caps::FULL);
+        let mut i = Input::new(&"x".repeat(60));
+        i.draw(&mut c, Rect::new(0, 0, 20, 1), "", &t, false);
+        i.set("settings");
+        i.cur = 8;
+        let mut c = Canvas::new(20, 1, Caps::FULL);
+        i.draw(&mut c, Rect::new(0, 0, 20, 1), "", &t, false);
+        assert!(c.to_text().starts_with("settings"), "{:?}", c.to_text());
+    }
+
     use super::*;
     use crate::canvas::Caps;
     use crate::input::Mods;
