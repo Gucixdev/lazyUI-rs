@@ -300,7 +300,14 @@ impl List {
             }
             match self.row(pos) {
                 Some(text) => {
-                    c.text_fit(r.x + 2, y, tw - 2, text, st);
+                    // a tab splits a row into a left part and one aligned to the right edge (a name and its size)
+                    let (left, right) = text.split_once('\t').unwrap_or((text, ""));
+                    c.text_fit(r.x + 2, y, tw - 2, left, st);
+                    let rw = crate::canvas::str_width(right) as i32;
+                    let lw = crate::canvas::str_width(left) as i32;
+                    if rw > 0 && 2 + lw + 2 + rw < tw {
+                        c.text_fit(r.x + tw - rw - 1, y, rw, right, st);
+                    }
                 }
                 None => {
                     c.text_fit(r.x + 2, y, tw - 2, "...", Style::fg(t.border).on(t.bg));

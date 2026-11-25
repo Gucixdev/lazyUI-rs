@@ -305,3 +305,22 @@ mod timing_lists {
         println!("table: first frame {first:?}, 100 pgdn frames {:?}", t.elapsed());
     }
 }
+
+#[cfg(test)]
+mod rows_with_tabs {
+    use crate::headless::{run_script, snapshot};
+    use crate::ui::Ui;
+
+    #[test]
+    fn a_tab_in_a_list_row_puts_the_rest_at_the_right_edge() {
+        let mut ui = Ui::from_spec("col\n  list id=g size=fill\n").unwrap();
+        ui.set_list("g", vec!["Dota 2\tGE-Proton".into(), "plain".into(), "narrow-name-here\tvery-long-right-part".into()]);
+        run_script(&mut ui, "size 30 4").unwrap();
+        let s = snapshot(&mut ui, 30, 4);
+        let rows: Vec<&str> = s.lines().collect();
+        assert!(rows[0].contains("Dota 2") && rows[0].trim_end().ends_with("GE-Proton"), "{s}");
+        assert!(rows[0].trim_end().len() == 29 || rows[0].trim_end().len() == 30, "{s}");
+        assert_eq!(rows[1].trim_end(), "  plain");
+        assert!(rows[2].contains("narrow-name-here") && !rows[2].contains("very"), "does not fit: left part only\n{s}");
+    }
+}
