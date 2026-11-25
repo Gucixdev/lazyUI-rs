@@ -45,6 +45,10 @@ impl Reader<'_> {
     pub fn i32(&mut self) -> Result<i32> {
         Ok(self.u32()? as i32)
     }
+    /// wl_fixed: signed 24.8
+    pub fn fixed(&mut self) -> Result<f64> {
+        Ok(self.i32()? as f64 / 256.0)
+    }
     pub fn string(&mut self) -> Result<String> {
         let len = self.u32()? as usize;
         if len == 0 {
@@ -147,7 +151,8 @@ impl Conn {
         Ok(())
     }
 
-    fn fill(&mut self) -> Result<()> {
+    /// One `recvmsg`: blocks when nothing is waiting, so call it after `poll` says the socket is readable.
+    pub fn fill(&mut self) -> Result<()> {
         let mut data = [0u8; 4096];
         let mut iov = libc::iovec { iov_base: data.as_mut_ptr() as *mut _, iov_len: data.len() };
         let mut cmsg = vec![0u8; unsafe { libc::CMSG_SPACE(16 * 4) } as usize];
@@ -181,25 +186,39 @@ impl Conn {
         Ok(())
     }
 
-    /// The next message, blocking. Descriptors received so far belong to the messages in order; they are handed to the
-    /// message that follows them, which is exact for the one event that carries one (the keyboard keymap).
+    /// The next complete message already received, without touching the socket.
+    pub fn take(&mut self) -> Result<Option<Msg>> {
+        if self.buf.len() < 8 {
+            return Ok(None);
+        }
+        let obj = u32::from_ne_bytes(self.buf[0..4].try_into().unwrap());
+        let w = u32::from_ne_bytes(self.buf[4..8].try_into().unwrap());
+        let (size, opcode) = ((w >> 16) as usize, (w & 0xffff) as u16);
+        if size < 8 || size % 4 != 0 {
+            return Err(Error::new(ErrorKind::InvalidData, format!("bad message size {size}")));
+        }
+        if self.buf.len() < size {
+            return Ok(None);
+        }
+        let payload = self.buf[8..size].to_vec();
+        self.buf.drain(..size);
+        // descriptors received so far belong to the messages in order; they go to the one that follows them, which is
+        // exact for the one event that carries one (the keyboard keymap)
+        Ok(Some(Msg { obj, opcode, payload, fds: std::mem::take(&mut self.fds) }))
+    }
+
+    /// The next message, blocking.
     pub fn read(&mut self) -> Result<Msg> {
         loop {
-            if self.buf.len() >= 8 {
-                let obj = u32::from_ne_bytes(self.buf[0..4].try_into().unwrap());
-                let w = u32::from_ne_bytes(self.buf[4..8].try_into().unwrap());
-                let (size, opcode) = ((w >> 16) as usize, (w & 0xffff) as u16);
-                if size < 8 || size % 4 != 0 {
-                    return Err(Error::new(ErrorKind::InvalidData, format!("bad message size {size}")));
-                }
-                if self.buf.len() >= size {
-                    let payload = self.buf[8..size].to_vec();
-                    self.buf.drain(..size);
-                    return Ok(Msg { obj, opcode, payload, fds: std::mem::take(&mut self.fds) });
-                }
+            if let Some(m) = self.take()? {
+                return Ok(m);
             }
             self.fill()?;
         }
+    }
+
+    pub fn raw_fd(&self) -> RawFd {
+        self.sock.as_raw_fd()
     }
 }
 

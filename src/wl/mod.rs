@@ -2,6 +2,7 @@
 //! `wire` is the message format and the socket (with file descriptors for shared memory); `globals` lists what the
 //! compositor offers. Nothing here draws yet.
 pub mod panel;
+pub mod seat;
 pub mod wire;
 
 use wire::{Arg, Conn};

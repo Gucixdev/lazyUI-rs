@@ -1,6 +1,6 @@
 //! A layer-shell panel: a surface the compositor places at a screen edge (bar, launcher, overlay), pixels through
 //! shared memory. Protocols: wl_compositor, wl_shm, zwlr_layer_shell_v1 (wlr-layer-shell-unstable-v1).
-use super::wire::{Arg, Conn};
+use super::wire::{Arg, Conn, Msg};
 use super::{find, Global};
 use std::io::{Error, Result};
 use std::os::fd::{FromRawFd, OwnedFd};
@@ -15,6 +15,14 @@ pub const ANCHOR_LEFT: u32 = 4;
 pub const ANCHOR_RIGHT: u32 = 8;
 
 const FORMAT_ARGB8888: u32 = 0;
+
+/// What a message did to the panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Open,
+    Resized,
+    Closed,
+}
 
 #[derive(Clone, Debug)]
 pub struct Spec {
@@ -80,6 +88,12 @@ impl Panel {
         }
     }
 
+    /// A panel with no surface behind it, for tests of code that drives one over a fake connection.
+    #[cfg(all(test, feature = "gui"))]
+    pub(crate) fn fake(layer_surface: u32, width: u32, height: u32) -> Panel {
+        Panel { surface: 6, layer_surface, shm: 4, width, height, map: None, pool: 0, buffer: 0, _fd: None }
+    }
+
     /// Put one frame on screen: `argb` is `width * height` pixels, 0xAARRGGBB. Makes the shared-memory pool on the
     /// first call; the buffer is reused, so call again only after the compositor released it (or for a single frame).
     pub fn draw(&mut self, c: &mut Conn, argb: &[u32]) -> Result<()> {
@@ -114,6 +128,49 @@ impl Panel {
         c.send(self.surface, 1, &[Arg::Obj(self.buffer), Arg::I32(0), Arg::I32(0)], &[])?;
         c.send(self.surface, 9, &[Arg::I32(0), Arg::I32(0), Arg::I32(w as i32), Arg::I32(h as i32)], &[])?;
         c.send(self.surface, 6, &[], &[])
+    }
+
+    /// React to a message of the layer surface: a new size (the buffer is dropped, the next `draw` makes one that
+    /// fits) or the compositor closing the panel. Anything else is not ours and changes nothing.
+    pub fn handle(&mut self, c: &mut Conn, m: &Msg) -> Result<State> {
+        if m.obj == 1 && m.opcode == 0 {
+            let mut r = m.reader();
+            let (obj, code, text) = (r.u32()?, r.u32()?, r.string()?);
+            return Err(Error::other(format!("wayland error on object {obj} code {code}: {text}")));
+        }
+        if m.obj != self.layer_surface {
+            return Ok(State::Open);
+        }
+        match m.opcode {
+            0 => {
+                let mut r = m.reader();
+                let (serial, w, h) = (r.u32()?, r.u32()?, r.u32()?);
+                c.send(self.layer_surface, 6, &[Arg::U32(serial)], &[])?;
+                if (w > 0 && w != self.width) || (h > 0 && h != self.height) {
+                    if w > 0 {
+                        self.width = w;
+                    }
+                    if h > 0 {
+                        self.height = h;
+                    }
+                    self.drop_buffer(c)?;
+                    return Ok(State::Resized);
+                }
+                Ok(State::Open)
+            }
+            1 => Ok(State::Closed),
+            _ => Ok(State::Open),
+        }
+    }
+
+    fn drop_buffer(&mut self, c: &mut Conn) -> Result<()> {
+        if let Some((p, len)) = self.map.take() {
+            c.send(self.buffer, 0, &[], &[])?;
+            c.send(self.pool, 1, &[], &[])?;
+            unsafe { libc::munmap(p as *mut _, len) };
+            self._fd = None;
+        }
+        Ok(())
     }
 
     /// Take the panel down: destroy the layer role, then the surface.
@@ -207,6 +264,32 @@ mod tests {
         let mut got = [0u32; 8];
         let n = unsafe { libc::pread(first.fds[0].as_raw_fd(), got.as_mut_ptr() as *mut _, 32, 0) };
         assert_eq!((n, got), (32, frame));
+    }
+
+    fn msg(obj: u32, opcode: u16, args: &[Arg]) -> Msg {
+        Msg { obj, opcode, payload: encode(0, 0, args)[8..].to_vec(), fds: vec![] }
+    }
+
+    #[test]
+    fn a_new_size_acks_and_drops_the_buffer_and_close_is_reported() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let mut c = Conn::from_stream(client);
+        let mut p = Panel { surface: 6, layer_surface: 7, shm: 4, width: 4, height: 2, map: None, pool: 0, buffer: 0, _fd: None };
+        p.draw(&mut c, &[0u32; 8]).unwrap();
+        let mut s = Conn::from_stream(server);
+        for _ in 0..5 {
+            s.read().unwrap();
+        }
+        assert_eq!(p.handle(&mut c, &msg(7, 0, &[Arg::U32(9), Arg::U32(4), Arg::U32(2)])).unwrap(), State::Open, "same size");
+        assert_eq!(p.handle(&mut c, &msg(7, 0, &[Arg::U32(10), Arg::U32(8), Arg::U32(3)])).unwrap(), State::Resized);
+        assert_eq!((p.width, p.height), (8, 3));
+        let ops: Vec<(u32, u16)> = (0..4).map(|_| { let m = s.read().unwrap(); (m.obj, m.opcode) }).collect();
+        assert_eq!(ops, vec![(7, 6), (7, 6), (p.buffer, 0), (p.pool, 1)], "two acks, then buffer and pool destroyed");
+        assert!(p.map.is_none());
+        assert_eq!(p.handle(&mut c, &msg(7, 1, &[])).unwrap(), State::Closed);
+        assert_eq!(p.handle(&mut c, &msg(55, 0, &[])).unwrap(), State::Open, "not our object");
+        let e = p.handle(&mut c, &msg(1, 0, &[Arg::U32(7), Arg::U32(2), Arg::Str("bad")])).unwrap_err().to_string();
+        assert!(e.contains("code 2: bad"), "{e}");
     }
 
     /// Needs a running compositor with layer-shell: shows a 240 x 16 strip at the bottom-left for one second, taking
