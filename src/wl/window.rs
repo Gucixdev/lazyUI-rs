@@ -61,6 +61,10 @@ impl Window {
         }
     }
 
+    pub fn surface(&self) -> u32 {
+        self.surface
+    }
+
     pub fn size(&self) -> (u32, u32) {
         (self.frame.width, self.frame.height)
     }

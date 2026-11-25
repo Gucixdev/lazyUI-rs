@@ -42,6 +42,8 @@ the old UI running.
 
 Elements: `row col panel pages spacer text progressbar searchbar buttonbar list keybar`.
 Sizes: `size=N | fill | fill:W | pct:P | min:N | max:N | @KEY | @KEY:N` (`@KEY` takes the cells from the model number KEY, `N` until it is set: the pane before a `splitter` uses it).
+Dragging to and from other programs (native window only): a `drag=` source whose payload is absolute paths, one per line, becomes a drag of those files (`text/uri-list`) once the pointer leaves the window, and the element hears `dragend` with number 2; files dropped on the window arrive as `drop` (text = the paths, one per line) on the `drop=file` element under the pointer. A list `reorder` drag never leaves the window.
+
 Hooks: `hook=NAME` on an element sends every event it raises to a running finedesktop as `emit NAME KIND ID TEXT` (a script in `hooks/on-user` or a subscriber sees it); nothing is sent without the attribute or without a desktop. Only the native window and panel loop do it (`gui::panel::run`).
 
 Tooltip: `tip="text"` on any element; it appears next to the pointer after it rests on the element for half a second, and goes when the pointer leaves or a button is pressed.

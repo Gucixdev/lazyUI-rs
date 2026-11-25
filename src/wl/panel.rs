@@ -89,6 +89,10 @@ impl Panel {
         Panel { surface: 6, layer_surface, frame: Frame::new(6, 4, width, height) }
     }
 
+    pub fn surface(&self) -> u32 {
+        self.surface
+    }
+
     pub fn size(&self) -> (u32, u32) {
         (self.frame.width, self.frame.height)
     }

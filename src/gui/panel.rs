@@ -108,6 +108,20 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
                 ui.dispatch(&e);
             }
         }
+        if !seat.dragging_out() {
+            if let Some((payload, _)) = ui.drag_in_progress() {
+                let ((px, py), (w, h)) = (seat.pointer(), p.size());
+                if px < 0.0 || py < 0.0 || px >= w as f64 || py >= h as f64 {
+                    if seat.start_drag(conn, p.surface(), &payload)? {
+                        ui.hand_over_drag();
+                    }
+                }
+            }
+        }
+        for d in seat.take_drops() {
+            let (cw, ch) = (r.cw as f64 / scale as f64, r.ch as f64 / scale as f64);
+            ui.drop_external((d.x / cw) as i32, (d.y / ch) as i32, &d.paths.join("\n"));
+        }
         let now = Instant::now();
         for e in seat.repeat(now) {
             ui.dispatch(&e);

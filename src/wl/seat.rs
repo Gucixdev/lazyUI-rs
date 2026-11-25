@@ -33,6 +33,10 @@ pub struct Seat {
     /// repeats per second and the wait before the first one; rate 0 turns repeating off
     repeat_rate: (u32, u32),
     held_key: Option<Held>,
+    /// serial of the last button press: a drag to another program must quote it
+    button_serial: u32,
+    dnd: Option<super::dnd::Dnd>,
+    drops: Vec<super::dnd::Drop>,
 }
 
 struct Held {
@@ -47,12 +51,35 @@ impl Seat {
         let g = find(globals, "wl_seat").ok_or_else(|| Error::other("the compositor has no wl_seat"))?;
         let id = c.new_id();
         c.send(registry, 0, &[Arg::U32(g.name), Arg::Str("wl_seat"), Arg::U32(g.version.min(5)), Arg::New(id)], &[])?;
-        Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0, keyboard: None, xkb: None, mods: Mods::NONE, keyboard_note: None, repeat_rate: (25, 600), held_key: None })
+        Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0, keyboard: None, xkb: None, mods: Mods::NONE, keyboard_note: None, repeat_rate: (25, 600), held_key: None, button_serial: 0, dnd: super::dnd::Dnd::bind(c, registry, globals, id)?, drops: Vec::new() })
     }
 
     /// A new cell size in surface units (the cell in pixels divided by the output scale).
     pub fn set_cell(&mut self, cw: f64, ch: f64) {
         self.cell = (cw.max(1.0), ch.max(1.0));
+    }
+
+    /// Pointer position in surface units.
+    pub fn pointer(&self) -> (f64, f64) {
+        self.pos
+    }
+
+    /// Hand the drag in progress to the compositor so other programs can take it: `payload` is paths, one per line.
+    /// False when there is no data device or the pointer was never pressed.
+    pub fn start_drag(&mut self, c: &mut Conn, surface: u32, payload: &str) -> Result<bool> {
+        match self.dnd.as_mut() {
+            Some(d) if self.button_serial != 0 && !d.dragging() => d.start(c, surface, self.button_serial, payload).map(|_| true),
+            _ => Ok(false),
+        }
+    }
+
+    pub fn dragging_out(&self) -> bool {
+        self.dnd.as_ref().is_some_and(|d| d.dragging())
+    }
+
+    /// What other programs dropped on the surface since the last call.
+    pub fn take_drops(&mut self) -> Vec<super::dnd::Drop> {
+        std::mem::take(&mut self.drops)
     }
 
     fn cell_at(&self) -> (i32, i32) {
@@ -186,6 +213,12 @@ impl Seat {
     pub fn handle(&mut self, c: &mut Conn, m: &Msg) -> Result<Vec<Event>> {
         let mut out = Vec::new();
         let mut r = m.reader();
+        if let Some(d) = self.dnd.as_mut().filter(|d| d.owns(m.obj)) {
+            if let Some(drop) = d.handle(c, m)? {
+                self.drops.push(drop);
+            }
+            return Ok(out);
+        }
         if m.obj == self.id {
             if m.opcode == 0 {
                 let caps = r.u32()?;
@@ -226,7 +259,10 @@ impl Seat {
             }
             // button(serial, time, button, state)
             3 => {
-                let (_, _, code, state) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?);
+                let (serial, _, code, state) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?);
+                if state == 1 {
+                    self.button_serial = serial;
+                }
                 let b = match code {
                     BTN_LEFT => 0,
                     BTN_MIDDLE => 1,
@@ -285,6 +321,34 @@ mod tests {
         assert_eq!((get.obj, get.opcode), (seat.id, 0), "get_pointer");
         assert_eq!(seat.pointer, Some(get.reader().u32().unwrap()));
         (seat, c, server)
+    }
+
+    #[test]
+    fn a_drag_out_quotes_the_serial_of_the_last_press_and_needs_a_data_device() {
+        let (mut seat, mut c, mut server) = ready();
+        assert!(!seat.start_drag(&mut c, 9, "/a").unwrap(), "no data device manager was advertised");
+        assert!(!seat.dragging_out());
+        let (a, b) = UnixStream::pair().unwrap();
+        let (mut c2, mut s2) = (Conn::from_stream(a), Conn::from_stream(b));
+        let g = vec![Global { name: 7, interface: "wl_seat".into(), version: 9 }, Global { name: 8, interface: "wl_data_device_manager".into(), version: 3 }];
+        let mut seat2 = Seat::bind(&mut c2, 2, &g, 10, 20).unwrap();
+        for _ in 0..3 {
+            s2.read().unwrap();
+        }
+        assert!(!seat2.start_drag(&mut c2, 9, "/a").unwrap(), "no button was pressed yet");
+        seat2.button_serial = 41;
+        assert!(seat2.start_drag(&mut c2, 9, "/a").unwrap());
+        assert!(seat2.dragging_out());
+        let mut last = None;
+        for _ in 0..5 {
+            last = Some(s2.read().unwrap());
+        }
+        let start = last.unwrap();
+        let mut r = start.reader();
+        assert_eq!(start.opcode, 0);
+        let (_, surface, icon, serial) = (r.u32().unwrap(), r.u32().unwrap(), r.u32().unwrap(), r.u32().unwrap());
+        assert_eq!((surface, icon, serial), (9, 0, 41));
+        let _ = (&mut server, &mut c);
     }
 
     fn ev(seat: &mut Seat, c: &mut Conn, opcode: u16, args: &[A]) -> Vec<Event> {

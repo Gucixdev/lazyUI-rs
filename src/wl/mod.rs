@@ -1,6 +1,7 @@
 //! A Wayland client written against the wire protocol, `libc` only, for panels (layer-shell) that winit cannot make.
 //! `wire` is the message format and the socket (with file descriptors for shared memory); `globals` lists what the
 //! compositor offers. Nothing here draws yet.
+pub mod dnd;
 pub mod panel;
 pub mod seat;
 pub mod shm;
@@ -114,6 +115,8 @@ mod tests {
 /// What the event loop needs of a drawable surface: a layer-shell panel or an xdg window.
 pub trait Surface {
     fn size(&self) -> (u32, u32);
+    /// The `wl_surface` object id (drags are started from it).
+    fn surface(&self) -> u32;
     /// Buffer pixels per surface unit (a 2x output asks for twice the pixels).
     fn scale(&self) -> u32 {
         1
@@ -124,6 +127,9 @@ pub trait Surface {
 }
 
 impl Surface for panel::Panel {
+    fn surface(&self) -> u32 {
+        panel::Panel::surface(self)
+    }
     fn size(&self) -> (u32, u32) {
         panel::Panel::size(self)
     }
@@ -136,6 +142,9 @@ impl Surface for panel::Panel {
 }
 
 impl Surface for window::Window {
+    fn surface(&self) -> u32 {
+        window::Window::surface(self)
+    }
     fn size(&self) -> (u32, u32) {
         window::Window::size(self)
     }

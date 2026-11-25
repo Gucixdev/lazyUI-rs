@@ -609,6 +609,33 @@ impl Ui {
             self.every.push((seconds, 0.0, event.to_string()));
         }
     }
+    /// The drag in progress that another program could take: `(payload, from)` for a plain `drag=` source (a list
+    /// row reorder stays inside the window). The payload is paths, one per line, when it is to be dropped outside.
+    pub fn drag_in_progress(&self) -> Option<(String, String)> {
+        self.dnd.active().filter(|d| !d.kind.starts_with("reorder:")).map(|d| (d.payload.clone(), d.from.clone()))
+    }
+
+    /// The pointer left the window with a drag: the compositor has it now. The element hears `dragend` with number 2.
+    pub fn hand_over_drag(&mut self) {
+        if let Some(d) = self.dnd.cancel() {
+            self.emit(&d.from, "dragend", &d.payload, 2.0);
+            self.dirty = true;
+        }
+    }
+
+    /// Something dragged in from another program (paths, one per line) was dropped at cell `(x, y)`: the element
+    /// under it that has `drop=file` (or `any`) hears `drop` with the paths. False when nothing took it.
+    pub fn drop_external(&mut self, x: i32, y: i32, payload: &str) -> bool {
+        match self.drop_target(x, y, "file") {
+            Some((id, _)) => {
+                self.emit(&id, "drop", payload, 0.0);
+                self.dirty = true;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The attribute `key` of the element with this `id` (the first one, when ids repeat).
     pub fn attr_of(&self, id: &str, key: &str) -> Option<String> {
         fn find(el: &El, id: &str, key: &str) -> Option<String> {
@@ -1862,6 +1889,36 @@ col
         assert!(evs.iter().any(|e| e.id == "src" && e.kind == "dragstart" && e.text == "a.txt"), "{evs:?}");
         assert!(evs.iter().any(|e| e.id == "bin" && e.kind == "drop" && e.text == "a.txt"), "{evs:?}");
         assert!(evs.iter().any(|e| e.id == "src" && e.kind == "dragend" && e.number == 1.0), "{evs:?}");
+    }
+
+    #[test]
+    fn a_drag_can_be_handed_to_another_program_and_files_can_arrive_from_one() {
+        let spec = "col\n  text id=src text=\"the file\" drag=/home/u/a.txt dragkind=file size=3\n  text id=bin text=\"bin\" drop=file size=3\n  text id=other text=\"text only\" drop=text size=3\n";
+        let mut u = Ui::from_spec(spec).unwrap();
+        frame(&mut u, 30, 10);
+        assert_eq!(u.drag_in_progress(), None);
+        u.dispatch(&Event::Mouse(MouseKind::Down(0), 2, 0, Mods::NONE));
+        u.dispatch(&Event::Mouse(MouseKind::Drag(0), 2, 4, Mods::NONE));
+        assert_eq!(u.drag_in_progress(), Some(("/home/u/a.txt".into(), "src".into())));
+        u.take_events();
+        u.hand_over_drag();
+        assert_eq!(u.drag_in_progress(), None);
+        let evs = u.take_events();
+        assert!(evs.iter().any(|e| e.id == "src" && e.kind == "dragend" && e.number == 2.0), "{evs:?}");
+        // from outside: the element with drop=file hears the paths, one that wants text does not
+        assert!(u.drop_external(2, 4, "/x/a\n/x/b"));
+        assert!(u.take_events().iter().any(|e| e.id == "bin" && e.kind == "drop" && e.text == "/x/a\n/x/b"));
+        assert!(!u.drop_external(2, 7, "/x/a"), "the text-only element refuses files");
+        assert!(!u.drop_external(2, 0, "/x/a"), "a source is not a target");
+    }
+
+    #[test]
+    fn a_reorder_drag_stays_in_the_window() {
+        let mut u = Ui::from_spec("col\n  list id=l items=\"a,b,c\" reorder=1\n").unwrap();
+        frame(&mut u, 20, 5);
+        u.dispatch(&Event::Mouse(MouseKind::Down(0), 2, 0, Mods::NONE));
+        u.dispatch(&Event::Mouse(MouseKind::Drag(0), 2, 2, Mods::NONE));
+        assert_eq!(u.drag_in_progress(), None);
     }
 
     #[test]
