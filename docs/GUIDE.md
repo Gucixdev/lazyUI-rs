@@ -41,7 +41,7 @@ turn keys and timers into events. A spec with an error reports `file: line N: me
 the old UI running.
 
 Elements: `row col panel pages spacer text progressbar searchbar buttonbar list keybar`.
-Sizes: `size=N | fill | fill:W | pct:P | min:N | max:N`.
+Sizes: `size=N | fill | fill:W | pct:P | min:N | max:N | @KEY | @KEY:N` (`@KEY` takes the cells from the model number KEY, `N` until it is set: the pane before a `splitter` uses it).
 
 ## As a library
 

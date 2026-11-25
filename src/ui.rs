@@ -190,8 +190,8 @@ fn parse_lines(lines: Vec<crate::components::SrcLine>, _w: Option<&crate::compon
             if k.is_empty() {
                 return Err(format!("{n}: empty attribute name"));
             }
-            if k == "size" && Size::parse(v).is_none() {
-                return Err(format!("{n}: size `{v}` is not N, fill, fill:W, pct:P, min:N or max:N"));
+            if k == "size" && Size::parse(v).is_none() && !v.starts_with('@') {
+                return Err(format!("{n}: size `{v}` is not N, @KEY, @KEY:N, fill, fill:W, pct:P, min:N or max:N"));
             }
             el.attrs.insert(k, v);
         }
@@ -364,6 +364,8 @@ pub struct Ui {
     states: HashMap<String, WState>,
     springs: HashMap<String, Spring>,
     focus: Option<String>,
+    /// the widget a left press landed on: it hears the drag and the release wherever the pointer goes
+    grab: Option<String>,
     placed: Plan,
     stacks: Stacks,
     size: (i32, i32),
@@ -392,6 +394,7 @@ impl Ui {
             theme: Theme::green(),
             model: HashMap::new(),
             states: HashMap::new(),
+            grab: None,
             springs: HashMap::new(),
             focus: None,
             placed: Plan::default(),
@@ -436,7 +439,7 @@ impl Ui {
         self.gen += 1;
         self.dirty = true;
     }
-    /// The model keys that decide where things go: the `bind` of every `pages`.
+    /// The model keys that decide where things go: the `bind` of every `pages` and the key of every `size=@KEY`.
     fn layout_keys_of(el: &El) -> Vec<String> {
         let mut out = Vec::new();
         fn walk(el: &El, out: &mut Vec<String>) {
@@ -444,6 +447,9 @@ impl Ui {
                 if let Some(k) = el.attr("bind") {
                     out.push(k.to_string());
                 }
+            }
+            if let Some(k) = el.attr("size").and_then(|v| v.strip_prefix('@')) {
+                out.push(k.split(':').next().unwrap_or(k).to_string());
             }
             for c in &el.children {
                 walk(c, out);
@@ -713,7 +719,19 @@ impl Ui {
         // sizes and rectangles live on stacks shared by the whole walk: a container pushes its own, its children push theirs
         // above, and it pops back to where it started
         let (base_s, base_r) = (st.sizes.len(), st.rects.len());
-        st.sizes.extend(el.children.iter().map(|c| c.attr("size").and_then(Size::parse).unwrap_or_else(|| Ui::default_size(c.kind, dir == Dir::Col))));
+        st.sizes.extend(el.children.iter().map(|c| {
+            let size = match c.attr("size") {
+                // `size=@KEY` or `size=@KEY:N`: as many cells as the model number says (a splitter writes it), N until it does
+                Some(k) if k.starts_with('@') => {
+                    let (key, start) = k[1..].split_once(':').unwrap_or((&k[1..], "0"));
+                    let cells = if self.model.contains_key(key) { self.number(key) } else { start.trim().parse().unwrap_or(0.0) };
+                    Some(Size::Fixed(cells.max(0.0) as i32))
+                }
+                Some(v) => Size::parse(v),
+                None => None,
+            };
+            size.unwrap_or_else(|| if c.kind == Kind::Custom("splitter") { Size::Fixed(1) } else { Ui::default_size(c.kind, dir == Dir::Col) })
+        }));
         {
             let Stacks { sizes, rects, scratch } = &mut *st;
             split_into(rects, scratch, inner, dir, &sizes[base_s..], gap);
@@ -1009,9 +1027,20 @@ impl Ui {
                 if let Some(done) = self.dnd_mouse(kind, *x, *y) {
                     return done;
                 }
+                if matches!(kind, MouseKind::Drag(0) | MouseKind::Up(0)) {
+                    if let Some(id) = self.grab.clone() {
+                        if matches!(kind, MouseKind::Up(0)) {
+                            self.grab = None;
+                        }
+                        return self.widget_event(&id, ev) != Res::Ignored;
+                    }
+                }
                 let hit = self.placed.iter().rev().find(|p| p.kind.focusable() && self.extent_of(*p).contains(*x, *y)).map(|p| p.id().to_string());
                 match hit {
                     Some(id) => {
+                        if matches!(kind, MouseKind::Down(0)) {
+                            self.grab = Some(id.clone());
+                        }
                         if matches!(kind, MouseKind::Down(0)) && self.focus.as_deref() != Some(id.as_str()) {
                             self.focus = Some(id.clone());
                             self.dirty = true;

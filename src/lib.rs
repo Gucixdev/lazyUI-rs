@@ -14,6 +14,7 @@ pub mod input;
 pub mod layout;
 pub mod lists;
 pub mod menu;
+pub mod splitter;
 pub mod native;
 pub mod plan;
 pub mod prelude;

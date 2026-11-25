@@ -17,7 +17,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 |---|---|
 | `virt` (virtual list/grid) | check: `list`, `table`; grid view of thumbnails is a gap |
 | `tabs` | has: `pages` |
-| `split` + `drag_frac` (draggable divider) | check: `layout::split` is fixed; draggable divider is a gap |
+| `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); a menu bar with sub-menus is a gap |
 | `tooltip` | gap |
 | `dialog_frame`, overlays | gap |
@@ -29,7 +29,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | DPI scale | check |
 | editable key bindings | has: BINDINGS.md |
 
-Order of work: media layer, drag and drop, dialogs (menus done), draggable split, tooltip, thumbnail grid.
+Order of work: media layer, dialogs, tooltip, thumbnail grid (menus and the draggable split are done).
 
 ## The split
 
