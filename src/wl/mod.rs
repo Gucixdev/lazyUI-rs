@@ -1,6 +1,7 @@
 //! A Wayland client written against the wire protocol, `libc` only, for panels (layer-shell) that winit cannot make.
 //! `wire` is the message format and the socket (with file descriptors for shared memory); `globals` lists what the
 //! compositor offers. Nothing here draws yet.
+pub mod panel;
 pub mod wire;
 
 use wire::{Arg, Conn};
@@ -17,6 +18,11 @@ pub struct Global {
 
 /// Ask the registry what exists: `get_registry`, then a `sync` round trip so every `global` event has arrived.
 pub fn globals(c: &mut Conn) -> std::io::Result<Vec<Global>> {
+    registry(c).map(|(_, g)| g)
+}
+
+/// Same, and the registry's object id too: `bind` requests go to it.
+pub fn registry(c: &mut Conn) -> std::io::Result<(u32, Vec<Global>)> {
     let registry = c.new_id();
     c.send(DISPLAY, 1, &[Arg::New(registry)], &[])?;
     let callback = c.new_id();
@@ -33,7 +39,7 @@ pub fn globals(c: &mut Conn) -> std::io::Result<Vec<Global>> {
             let mut r = m.reader();
             out.push(Global { name: r.u32()?, interface: r.string()?, version: r.u32()? });
         } else if m.obj == callback {
-            return Ok(out);
+            return Ok((registry, out));
         }
     }
 }
