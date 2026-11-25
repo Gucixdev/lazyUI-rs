@@ -50,6 +50,8 @@ Menu bar: `menubar menus="File=Open,-,Recent>a|b,~Quit;Edit=Copy"` (`;` between 
 
 Floating window: `floatwin bind=show title=Props from=info image=thumb w=40 h=12` is open while `show` is not 0; it floats over the UI without taking it over (a click focuses it, the title bar drags it, `x` or esc closes it and emits `close`). Put it last in the spec so it is on top.
 
+Gamepad (native window and panel loop): evdev gamepads with a south button are read from `/dev/input/event*` (needs read access, usually the `input` group) and become keys: d-pad and left stick = arrows with repeat, A = enter, B = esc, X = space, Y = `f`, shoulders = tab / shift-tab, start = ctrl-q. No device or no permission is silently no pad; a pad plugged in later is found within 5 s.
+
 Tooltip: `tip="text"` on any element; it appears next to the pointer after it rests on the element for half a second, and goes when the pointer leaves or a button is pressed.
 
 ## As a library

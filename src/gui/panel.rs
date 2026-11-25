@@ -97,6 +97,7 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
     let mut closed = false;
     let (base_px, mut scale) = (r.px(), 1u32);
     let hook_sock = fdctl::socket();
+    let mut pad = crate::gamepad::Pad::open();
     loop {
         while let Some(m) = conn.take()? {
             match p.handle(conn, &m)? {
@@ -124,6 +125,10 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
         }
         let now = Instant::now();
         for e in seat.repeat(now) {
+            ui.dispatch(&e);
+        }
+        pad.rescan(now);
+        for e in pad.read(now).into_iter().chain(pad.repeat(now)) {
             ui.dispatch(&e);
         }
         ui.tick(now.duration_since(last).as_secs_f64().min(0.25));
@@ -167,10 +172,19 @@ pub fn run(conn: &mut Conn, p: &mut impl Surface, seat: &mut Seat, ui: &mut Ui, 
             let ms = (d.as_secs_f64() * 1000.0).ceil().clamp(1.0, 60_000.0) as i32;
             timeout_ms = if timeout_ms < 0 { ms } else { timeout_ms.min(ms) };
         }
+        if let Some(d) = pad.next_repeat(Instant::now()) {
+            let ms = (d.as_secs_f64() * 1000.0).ceil().clamp(1.0, 60_000.0) as i32;
+            timeout_ms = if timeout_ms < 0 { ms } else { timeout_ms.min(ms) };
+        }
+        if pad.is_empty() {
+            // look for a pad plugged in later without waking a quiet window more than every few seconds
+            timeout_ms = if timeout_ms < 0 { 5000 } else { timeout_ms.min(5000) };
+        }
         let mut fds = vec![libc::pollfd { fd: conn.raw_fd(), events: libc::POLLIN, revents: 0 }];
         if let Some(f) = follow {
             fds.push(libc::pollfd { fd: f.rd, events: libc::POLLIN, revents: 0 });
         }
+        fds.extend(pad.fds().into_iter().map(|fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }));
         let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, timeout_ms) };
         if n < 0 {
             let e = std::io::Error::last_os_error();

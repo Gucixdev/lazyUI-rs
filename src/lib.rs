@@ -7,6 +7,7 @@ pub mod dialog;
 pub mod dnd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fdctl;
+pub mod gamepad;
 pub mod grid;
 #[cfg(feature = "gui")]
 pub mod gui;
