@@ -12,6 +12,18 @@ use std::collections::HashMap;
 
 // ---- the tree -------------------------------------------------------------------------------------
 
+/// The element under a resting pointer that has a `tip=` text: where, since when (Ui clock), shown yet.
+struct Tip {
+    path: Vec<u32>,
+    text: String,
+    at: (i32, i32),
+    since: f64,
+    shown: bool,
+}
+
+/// Seconds a pointer rests on an element before its `tip` appears.
+const TIP_DELAY: f64 = 0.5;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     /// a native widget from `native::find` (charts, pickers...), by its registered name
@@ -366,6 +378,7 @@ pub struct Ui {
     focus: Option<String>,
     /// the widget a left press landed on: it hears the drag and the release wherever the pointer goes
     grab: Option<String>,
+    tip: Option<Tip>,
     placed: Plan,
     stacks: Stacks,
     size: (i32, i32),
@@ -395,6 +408,7 @@ impl Ui {
             model: HashMap::new(),
             states: HashMap::new(),
             grab: None,
+            tip: None,
             springs: HashMap::new(),
             focus: None,
             placed: Plan::default(),
@@ -617,6 +631,11 @@ impl Ui {
             return;
         }
         self.clock += dt;
+        let clock = self.clock;
+        if let Some(t) = self.tip.as_mut().filter(|t| !t.shown && clock - t.since >= TIP_DELAY) {
+            t.shown = true;
+            self.dirty = true;
+        }
         for s in self.springs.values_mut() {
             if !s.at_rest() {
                 s.step(dt);
@@ -672,7 +691,8 @@ impl Ui {
     /// Seconds until the next periodic event, if there is one.
     pub fn next_deadline(&self) -> Option<f64> {
         let live = self.live().filter(|p| *p > 0.1).map(|p| p - self.clock.rem_euclid(p));
-        self.every.iter().map(|(p, a, _)| (p - a).max(0.0)).chain(live).fold(None, |m: Option<f64>, x| Some(m.map_or(x, |y| y.min(x))))
+        let tip = self.tip.as_ref().filter(|t| !t.shown).map(|t| (TIP_DELAY - (self.clock - t.since)).max(0.0));
+        self.every.iter().map(|(p, a, _)| (p - a).max(0.0)).chain(live).chain(tip).fold(None, |m: Option<f64>, x| Some(m.map_or(x, |y| y.min(x))))
     }
 
     // ---- layout -----------------------------------------------------------------------------------
@@ -793,6 +813,7 @@ impl Ui {
         }
         self.root = root;
         self.placed = placed;
+        self.draw_tip(c);
         self.draw_drag(c);
         self.dirty = false;
     }
@@ -1024,6 +1045,7 @@ impl Ui {
                 None => false,
             },
             Event::Mouse(kind, x, y, _) => {
+                self.hover(kind, *x, *y);
                 if let Some(done) = self.dnd_mouse(kind, *x, *y) {
                     return done;
                 }
@@ -1159,6 +1181,39 @@ impl Ui {
     }
 
     /// The target that would take the drop and the payload riding along with the pointer.
+    fn hide_tip(&mut self) {
+        if self.tip.take().is_some_and(|t| t.shown) {
+            self.dirty = true;
+        }
+    }
+
+    /// Follow the pointer for tooltips: moving within one element keeps its clock, a press or the wheel hides the tip.
+    fn hover(&mut self, kind: &MouseKind, x: i32, y: i32) {
+        if !matches!(kind, MouseKind::Move) {
+            self.hide_tip();
+            return;
+        }
+        let found = self.placed.iter().rev().find(|p| p.rect.contains(x, y) && self.attr_at(*p, "tip").is_some()).map(|p| (p.path().to_vec(), self.attr_at(p, "tip").unwrap_or_default()));
+        match (found, self.tip.as_mut()) {
+            (Some((path, _)), Some(t)) if t.path == path => t.at = (x, y),
+            (Some((path, text)), _) => {
+                self.hide_tip();
+                self.tip = Some(Tip { path, text, at: (x, y), since: self.clock, shown: false });
+            }
+            (None, _) => self.hide_tip(),
+        }
+    }
+
+    fn draw_tip(&self, c: &mut Canvas) {
+        let Some(t) = self.tip.as_ref().filter(|t| t.shown) else { return };
+        let w = (crate::canvas::str_width(&t.text) as i32 + 2).min(c.w);
+        let x = (t.at.0 + 1).min(c.w - w).max(0);
+        let y = if t.at.1 + 2 < c.h { t.at.1 + 1 } else { (t.at.1 - 1).max(0) };
+        let st = Style::fg(self.theme.fg).on(crate::gfx::mix(self.theme.bg, self.theme.dim, 0.4));
+        c.fill(Rect::new(x, y, w, 1), ' ', st);
+        c.text_fit(x + 1, y, w - 2, &t.text, st);
+    }
+
     fn draw_drag(&self, c: &mut Canvas) {
         let Some(d) = self.dnd.active() else { return };
         if let Some((id, _)) = Ui::reorder_of(&d.kind) {
@@ -1864,5 +1919,23 @@ col
                 let _ = frame(&mut u, 10 + (i % 30) as i32, 5);
             }
         }
+    }
+
+    #[test]
+    fn a_tip_shows_after_the_pointer_rests_and_hides_on_leaving_or_pressing() {
+        use crate::headless::{run_script, snapshot};
+        let mut ui = Ui::from_spec("col\n  text id=a text=alpha tip=\"the first one\" size=1\n  text id=b text=beta size=1\n  spacer\n").unwrap();
+        run_script(&mut ui, "size 30 5\nmove 2 0").unwrap();
+        assert!(!snapshot(&mut ui, 30, 5).contains("first one"), "not before the delay");
+        assert!(ui.next_deadline().is_some_and(|d| d <= TIP_DELAY), "a timer is armed for it");
+        run_script(&mut ui, "tick 0.3\nmove 3 0\ntick 0.3").unwrap();
+        assert!(snapshot(&mut ui, 30, 5).contains("first one"), "moving inside the element keeps the clock:\n{}", snapshot(&mut ui, 30, 5));
+        run_script(&mut ui, "move 2 1").unwrap();
+        assert!(!snapshot(&mut ui, 30, 5).contains("first one"), "gone when the pointer leaves");
+        run_script(&mut ui, "move 2 0\ntick 0.6").unwrap();
+        assert!(snapshot(&mut ui, 30, 5).contains("first one"));
+        run_script(&mut ui, "click 2 0").unwrap();
+        assert!(!snapshot(&mut ui, 30, 5).contains("first one"), "a press hides it");
+        assert!(ui.next_deadline().is_none());
     }
 }

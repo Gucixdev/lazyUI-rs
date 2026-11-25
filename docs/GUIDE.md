@@ -42,6 +42,7 @@ the old UI running.
 
 Elements: `row col panel pages spacer text progressbar searchbar buttonbar list keybar`.
 Sizes: `size=N | fill | fill:W | pct:P | min:N | max:N | @KEY | @KEY:N` (`@KEY` takes the cells from the model number KEY, `N` until it is set: the pane before a `splitter` uses it).
+Tooltip: `tip="text"` on any element; it appears next to the pointer after it rests on the element for half a second, and goes when the pointer leaves or a button is pressed.
 
 ## As a library
 
