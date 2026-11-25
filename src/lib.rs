@@ -4,6 +4,8 @@ pub mod attrs;
 pub mod build;
 pub mod components;
 pub mod dnd;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fdctl;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod headless;
