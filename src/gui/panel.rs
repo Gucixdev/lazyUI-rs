@@ -104,6 +104,9 @@ pub fn run(conn: &mut Conn, p: &mut Panel, seat: &mut Seat, ui: &mut Ui, r: &mut
             }
         }
         let now = Instant::now();
+        for e in seat.repeat(now) {
+            ui.dispatch(&e);
+        }
         ui.tick(now.duration_since(last).as_secs_f64().min(0.25));
         last = now;
         loop {
@@ -121,13 +124,17 @@ pub fn run(conn: &mut Conn, p: &mut Panel, seat: &mut Seat, ui: &mut Ui, r: &mut
         if ui.dirty {
             show(p, conn, ui, r)?;
         }
-        let timeout_ms: i32 = if ui.animating() {
+        let mut timeout_ms: i32 = if ui.animating() {
             16
         } else if let Some(s) = ui.next_deadline() {
             (s * 1000.0).ceil().clamp(1.0, 60_000.0) as i32
         } else {
             -1
         };
+        if let Some(d) = seat.next_repeat(Instant::now()) {
+            let ms = (d.as_secs_f64() * 1000.0).ceil().clamp(1.0, 60_000.0) as i32;
+            timeout_ms = if timeout_ms < 0 { ms } else { timeout_ms.min(ms) };
+        }
         let mut fds = vec![libc::pollfd { fd: conn.raw_fd(), events: libc::POLLIN, revents: 0 }];
         if let Some(f) = follow {
             fds.push(libc::pollfd { fd: f.rd, events: libc::POLLIN, revents: 0 });

@@ -22,6 +22,7 @@ struct Fns {
     sym_to_utf32: unsafe extern "C" fn(u32) -> u32,
     keymap_from_names: unsafe extern "C" fn(P, *const c_void, u32) -> P,
     keymap_as_string: unsafe extern "C" fn(P, u32) -> *mut c_char,
+    key_repeats: unsafe extern "C" fn(P, u32) -> c_int,
 }
 
 pub struct Xkb {
@@ -61,6 +62,7 @@ impl Xkb {
             sym_to_utf32: sym(lib, "xkb_keysym_to_utf32")?,
             keymap_from_names: sym(lib, "xkb_keymap_new_from_names")?,
             keymap_as_string: sym(lib, "xkb_keymap_get_as_string")?,
+            key_repeats: sym(lib, "xkb_keymap_key_repeats")?,
         };
         let ctx = unsafe { (f.context_new)(0) };
         if ctx.is_null() {
@@ -93,6 +95,11 @@ impl Xkb {
         self.keymap = km;
         self.state = unsafe { (self.f.state_new)(km) };
         Ok(())
+    }
+
+    /// Whether holding this evdev key repeats it (letters do, shift and ctrl do not).
+    pub fn key_repeats(&self, evdev: u32) -> bool {
+        !self.keymap.is_null() && unsafe { (self.f.key_repeats)(self.keymap, evdev + 8) } != 0
     }
 
     pub fn has_keymap(&self) -> bool {
@@ -212,6 +219,7 @@ mod tests {
         assert_eq!(none, Mods::NONE);
         let lower = x.key(a, none);
         assert!(lower.is_some(), "the key A types something in any layout");
+        assert!(x.key_repeats(a) && !x.key_repeats(42), "A repeats, left shift (42) does not");
         println!("A -> {lower:?}");
         let shift = x.update_mask(1, 0, 0, 0);
         assert_eq!(shift, Mods::SHIFT);

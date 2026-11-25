@@ -1,11 +1,12 @@
 //! The pointer and keyboard of a `wl_seat`, turned into lazyui events: the pointer as mouse events in cells, the
-//! keyboard through libxkbcommon (`xkb`, loaded at run time; without it there is no keyboard). No key repeat yet:
-//! the compositor does not repeat for clients, the client must, with the rate from `wl_keyboard.repeat_info`.
+//! keyboard through libxkbcommon (`xkb`, loaded at run time; without it there is no keyboard). The compositor does not
+//! repeat keys for clients: the seat does, with the rate and delay from `wl_keyboard.repeat_info` (`next_repeat`, `repeat`).
 use super::wire::{Arg, Conn, Msg};
 use super::xkb::Xkb;
 use super::{find, Global};
 use crate::input::{Event, Mods, MouseKind};
 use std::io::{Error, Result};
+use std::time::{Duration, Instant};
 
 const CAP_POINTER: u32 = 1;
 const CAP_KEYBOARD: u32 = 2;
@@ -29,6 +30,15 @@ pub struct Seat {
     mods: Mods,
     /// why there is no keyboard, when there is none
     pub keyboard_note: Option<String>,
+    /// repeats per second and the wait before the first one; rate 0 turns repeating off
+    repeat_rate: (u32, u32),
+    held_key: Option<Held>,
+}
+
+struct Held {
+    key: u32,
+    ev: Event,
+    due: Instant,
 }
 
 impl Seat {
@@ -37,11 +47,32 @@ impl Seat {
         let g = find(globals, "wl_seat").ok_or_else(|| Error::other("the compositor has no wl_seat"))?;
         let id = c.new_id();
         c.send(registry, 0, &[Arg::U32(g.name), Arg::Str("wl_seat"), Arg::U32(g.version.min(5)), Arg::New(id)], &[])?;
-        Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0, keyboard: None, xkb: None, mods: Mods::NONE, keyboard_note: None })
+        Ok(Seat { id, pointer: None, pos: (0.0, 0.0), cell: (cw.max(1) as f64, ch.max(1) as f64), last: (0, 0), held: None, wheel: 0.0, keyboard: None, xkb: None, mods: Mods::NONE, keyboard_note: None, repeat_rate: (25, 600), held_key: None })
     }
 
     fn cell_at(&self) -> (i32, i32) {
         ((self.pos.0 / self.cell.0).floor() as i32, (self.pos.1 / self.cell.1).floor() as i32)
+    }
+
+    /// How long until the held key repeats; None when no key is held.
+    pub fn next_repeat(&self, now: Instant) -> Option<Duration> {
+        self.held_key.as_ref().map(|h| h.due.saturating_duration_since(now))
+    }
+
+    /// The repeats of the held key that are due at `now`, one per interval. After a long stall (a loop that was not
+    /// running) the missed ones are dropped, not replayed.
+    pub fn repeat(&mut self, now: Instant) -> Vec<Event> {
+        let interval = Duration::from_secs_f64(1.0 / self.repeat_rate.0.max(1) as f64);
+        let Some(h) = self.held_key.as_mut() else { return Vec::new() };
+        let mut out = Vec::new();
+        if now.saturating_duration_since(h.due) > Duration::from_secs(1) {
+            h.due = now;
+        }
+        while h.due <= now && out.len() < 8 {
+            out.push(h.ev.clone());
+            h.due += interval;
+        }
+        out
     }
 
     // capabilities: ask for the pointer once, release it when the seat loses it
@@ -81,6 +112,7 @@ impl Seat {
                 c.send(k, 3, &[], &[])?;
                 self.keyboard = None;
                 self.mods = Mods::NONE;
+                self.held_key = None;
             }
             _ => {}
         }
@@ -110,11 +142,30 @@ impl Seat {
                     self.keyboard_note = Some(e.to_string());
                 }
             }
-            2 => self.mods = Mods::NONE,
+            2 => {
+                self.mods = Mods::NONE;
+                self.held_key = None;
+            }
             3 => {
                 let (_, _, key, state) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?);
                 if state == 1 {
-                    return Ok(x.key(key, self.mods));
+                    let ev = x.key(key, self.mods);
+                    let (rate, delay) = self.repeat_rate;
+                    self.held_key = match &ev {
+                        Some(e) if rate > 0 && x.key_repeats(key) => Some(Held { key, ev: e.clone(), due: Instant::now() + Duration::from_millis(delay as u64) }),
+                        _ => None,
+                    };
+                    return Ok(ev);
+                }
+                if self.held_key.as_ref().is_some_and(|h| h.key == key) {
+                    self.held_key = None;
+                }
+            }
+            5 => {
+                let (rate, delay) = (r.i32()?, r.i32()?);
+                self.repeat_rate = (rate.max(0) as u32, delay.max(0) as u32);
+                if rate <= 0 {
+                    self.held_key = None;
                 }
             }
             4 => {
@@ -334,6 +385,25 @@ mod tests {
             modifiers(&mut seat, &mut c, 4);
             assert_eq!(key(&mut seat, &mut c, 30, 1), vec![Event::Key(crate::input::Key::Char('a'), Mods::CTRL)]);
         }
+        // holding a letter repeats it after the delay; shift never does; a release stops it
+        modifiers(&mut seat, &mut c, 0);
+        let info = Msg { obj: kb, opcode: 5, payload: encode(0, 0, &[A::I32(25), A::I32(600)])[8..].to_vec(), fds: vec![] };
+        seat.handle(&mut c, &info).unwrap();
+        let pressed = key(&mut seat, &mut c, 30, 1);
+        let t0 = Instant::now();
+        assert_eq!(seat.repeat(t0), vec![], "nothing before the delay");
+        assert!(seat.next_repeat(t0).unwrap() > Duration::from_millis(500));
+        let later = seat.repeat(t0 + Duration::from_millis(700));
+        assert!(later.len() >= 2 && later.iter().all(|e| Some(e) == pressed.first()), "{later:?}");
+        key(&mut seat, &mut c, 30, 0);
+        assert_eq!(seat.repeat(t0 + Duration::from_secs(5)), vec![]);
+        assert_eq!(seat.next_repeat(t0), None);
+        key(&mut seat, &mut c, 42, 1);
+        assert_eq!(seat.next_repeat(t0), None, "left shift does not repeat");
+        let off = Msg { obj: kb, opcode: 5, payload: encode(0, 0, &[A::I32(0), A::I32(600)])[8..].to_vec(), fds: vec![] };
+        seat.handle(&mut c, &off).unwrap();
+        key(&mut seat, &mut c, 30, 1);
+        assert_eq!(seat.next_repeat(t0), None, "rate 0 turns repeating off");
         // losing the capability releases the keyboard
         let none = Msg { obj: seat.id, opcode: 0, payload: encode(0, 0, &[A::U32(0)])[8..].to_vec(), fds: vec![] };
         seat.handle(&mut c, &none).unwrap();
