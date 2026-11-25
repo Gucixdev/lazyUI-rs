@@ -20,7 +20,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | `split` + `drag_frac` (draggable divider) | has: `splitter` (drag or arrow keys writes cells into the model; the pane before it says `size=@KEY:START`; a press keeps hearing the drag outside the divider) |
 | `menu`, context menu | has: `menu` (popup at the label or at the right-click, separators, greyed items, outside click closes); a menu bar with sub-menus is a gap |
 | `tooltip` | has: `tip="text"` on any element (half a second of rest, one line; multi-line is a gap) |
-| `dialog_frame`, overlays | gap |
+| `dialog_frame`, overlays | has: `dialog` (modal, keys and clicks belong to it while `bind=KEY` is not 0; buttons, default, first-letter keys, esc cancels); a non-modal floating window is a gap |
 | `text_input` | has: `searchbar`; path bar with completion is a gap |
 | `progress` | has: `progressbar` |
 | `icon`, `icon_button`, thumbnails, images | gap: media layer (PNG/JPEG/WebP, icon themes) |
@@ -29,7 +29,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | DPI scale | check |
 | editable key bindings | has: BINDINGS.md |
 
-Order of work: media layer, dialogs, thumbnail grid (menus, the draggable split and tooltips are done).
+Order of work: media layer, thumbnail grid (menus, dialogs, the draggable split and tooltips are done).
 
 ## The split
 

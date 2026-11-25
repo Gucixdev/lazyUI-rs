@@ -3,6 +3,7 @@ pub mod app;
 pub mod attrs;
 pub mod build;
 pub mod components;
+pub mod dialog;
 pub mod dnd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fdctl;

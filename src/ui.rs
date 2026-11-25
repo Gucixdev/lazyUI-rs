@@ -986,7 +986,7 @@ impl Ui {
     }
 
     fn cycle_focus(&mut self, back: bool) {
-        let ids: Vec<String> = self.placed.iter().filter(|p| p.kind.focusable()).map(|p| p.id().to_string()).collect();
+        let ids: Vec<String> = self.placed.iter().filter(|p| p.kind.focusable() && (p.kind != Kind::Custom("dialog") || self.dialog_is_open(*p))).map(|p| p.id().to_string()).collect();
         if ids.is_empty() {
             return;
         }
@@ -998,6 +998,17 @@ impl Ui {
 
     /// Feed one terminal event. True when something used it.
     pub fn dispatch(&mut self, ev: &Event) -> bool {
+        // an open dialog is modal: it hears everything but resizes, and the focus goes to it
+        if !matches!(ev, Event::Resize(..)) {
+            if let Some(id) = self.open_dialog() {
+                if self.focus.as_deref() != Some(id.as_str()) {
+                    self.focus = Some(id.clone());
+                    self.dirty = true;
+                }
+                self.widget_event(&id, ev);
+                return true;
+            }
+        }
         match ev {
             Event::Resize(..) => {
                 self.dirty = true;
@@ -1181,6 +1192,15 @@ impl Ui {
     }
 
     /// The target that would take the drop and the payload riding along with the pointer.
+    fn dialog_is_open(&self, p: Placed) -> bool {
+        Ui::el_at(&self.root, &p.path()).and_then(|e| e.attr("bind")).is_some_and(|k| self.number(k) != 0.0)
+    }
+
+    /// The id of the topmost open `dialog`, if any.
+    fn open_dialog(&self) -> Option<String> {
+        self.placed.iter().rev().find(|p| p.kind == Kind::Custom("dialog") && self.dialog_is_open(*p)).map(|p| p.id().to_string())
+    }
+
     fn hide_tip(&mut self) {
         if self.tip.take().is_some_and(|t| t.shown) {
             self.dirty = true;
