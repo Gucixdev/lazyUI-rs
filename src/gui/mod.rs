@@ -4,6 +4,7 @@
 //! - `present`: pixels to the screen, either through shared memory (CPU, works everywhere) or wgpu (GPU, feature `gpu`);
 //! - `tune`: picks and switches between the two from measured frame cost, and slows animation when frames are slow;
 //! - `window`: winit loop and input mapping, `drive_gui` is the counterpart of `runtime::drive`.
+pub mod panel;
 pub mod png;
 mod present;
 pub mod raster;

@@ -7,7 +7,7 @@ Decided 2026-11-24: lazyUI-rs is the one UI standard. Programs move over only wh
 | filem8 | own `fm8-ui` (1.9k lines, wgpu+winit, immediate mode) | every row below is "has" |
 | steamdeck_launcher | iced | window backend + gamepad focus + lists |
 | fastkit | Go + TypeScript web stack | the web backend (wasm/htmx) covers its forms and tables |
-| finedesktop | already a client (themes, ctl) | stays additive-only; shared theme file done (`Theme::from_finedesktop`), ctl client done (`lazyui::fdctl`: send, subscribe), Wayland wire client (`lazyui::wl`: messages, fd passing, registry, `wl::panel` layer-shell surface with shm frame; shown for 1 s on the running desktop without a protocol error), no input and no lazyui Ui rendering into it yet |
+| finedesktop | already a client (themes, ctl) | stays additive-only; shared theme file done (`Theme::from_finedesktop`), ctl client done (`lazyui::fdctl`: send, subscribe), Wayland wire client (`lazyui::wl`: messages, fd passing, registry, `wl::panel` layer-shell surface with shm frame; shown for 1 s on the running desktop without a protocol error), `gui::panel::show` draws a lazyui `Ui` into it (example `panel`, exit 0 on the running desktop; not seen on screen: the compositor has no screencopy, so grim cannot capture it), no input yet |
 
 ## filem8: fm8-ui primitive -> lazyUI
 
