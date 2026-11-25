@@ -29,7 +29,7 @@ Status words: **has**, **gap**, **check** (exists, not yet shown to be enough). 
 | DPI scale | has: the native window follows `wl_output.scale` of the outputs it is on (`set_buffer_scale`, font and pointer cells rescaled); fractional scales and the winit window's own `ScaleFactorChanged` are separate; not seen on a real 2x output |
 | editable key bindings | has: BINDINGS.md |
 
-Left before filem8 can move: icon themes, real icons and thumbnails from a slow disk; a non-modal floating window is `floatwin` (inside the window; a second native toplevel is not done); question in claude-config/questions.md.
+Left before filem8 can move: icon themes (fm8-lz asks fm8-core for PNG icons on its worker thread, but this machine has no theme with PNG icons that `IconThemes::auto` accepts, so it was never seen working; SVG icons need a rasteriser), real icons and thumbnails from a slow disk; a non-modal floating window is `floatwin` (inside the window; a second native toplevel is not done); question in claude-config/questions.md.
 
 ## The split
 
