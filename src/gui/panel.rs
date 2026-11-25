@@ -1,7 +1,8 @@
 //! A `Ui` drawn into a layer-shell panel (`crate::wl::panel`): cells to pixels with the same rasteriser as the window,
 //! pixels to 0xAARRGGBB for the shared-memory buffer.
 use super::raster::{Pixels, Raster};
-use crate::canvas::{Caps, Canvas};
+use crate::canvas::{Caps, Canvas, Color};
+use crate::widgets::theme::Theme;
 use crate::ui::Ui;
 use crate::wl::panel::Panel;
 use crate::wl::wire::Conn;
@@ -18,6 +19,22 @@ pub fn frame(ui: &mut Ui, r: &mut Raster, w: usize, h: usize) -> Vec<u32> {
     ui.render(&mut c);
     r.paint(&mut px, None, &c);
     argb(&px.rgba)
+}
+
+/// Put a theme on the `Ui` and make the area the cells do not cover (the pixel remainder) match its background.
+pub fn apply_theme(ui: &mut Ui, r: &mut Raster, t: Theme) {
+    if let Color::Rgb(a, b, c) = t.bg {
+        r.default_bg = [a, b, c];
+    }
+    if let Color::Rgb(a, b, c) = t.fg {
+        r.default_fg = [a, b, c];
+    }
+    ui.theme = t;
+}
+
+/// What a finedesktop event line asks of a panel: the theme name, for a `theme` event only.
+pub fn theme_of(e: &crate::fdctl::Event) -> Option<&str> {
+    (e.kind == "theme" && !e.rest.is_empty()).then_some(e.rest.as_str())
 }
 
 /// Draw `ui` once into an open panel.
@@ -45,5 +62,26 @@ mod tests {
         let bg = f[w * h - 1];
         assert!(f.iter().any(|&p| p != bg), "some pixel differs from the background: the text was drawn");
         assert!(f.iter().all(|&p| p >> 24 == 0xff), "opaque");
+    }
+
+    #[test]
+    fn only_a_theme_event_with_a_name_changes_the_theme() {
+        use crate::fdctl::Event;
+        assert_eq!(theme_of(&Event::parse("theme dracula")), Some("dracula"));
+        assert_eq!(theme_of(&Event::parse("focus 3")), None);
+        assert_eq!(theme_of(&Event::parse("theme")), None);
+    }
+
+    #[test]
+    fn apply_theme_sets_the_background_the_remainder_uses() {
+        let Ok(mut r) = Raster::system(14.0, None) else { return };
+        let mut ui = Ui::new(crate::prelude::text("x"));
+        let mut t = Theme::from_finedesktop("nonexistent-theme").unwrap_or_else(|_| ui.theme.clone());
+        t.bg = Color::Rgb(1, 2, 3);
+        apply_theme(&mut ui, &mut r, t);
+        assert_eq!(r.default_bg, [1, 2, 3]);
+        let (w, h) = (r.cw * 4 + 5, r.ch);
+        let f = frame(&mut ui, &mut r, w, h);
+        assert_eq!(f[r.cw * 4 + 4], 0xff010203, "the remainder column carries the theme background");
     }
 }

@@ -150,4 +150,18 @@ mod tests {
         assert!(!r.is_empty(), "empty reply");
         println!("state: {r}");
     }
+
+    /// Needs a running finedesktop: subscribes to `user`, emits one (reaches only subscribers when no `on-user` hook
+    /// exists), reads it back. `cargo test --lib fdctl -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_subscribe_receives_an_emitted_user_event() {
+        let sock = socket().expect("no finedesktop socket");
+        let mut sub = subscribe(&sock, &["user"]).unwrap();
+        assert_eq!(send(&sock, "emit lazyui-test hello").unwrap(), "ok");
+        let e = sub.next().expect("stream ended");
+        println!("{e:?}");
+        assert_eq!(e.kind, "user");
+        assert!(e.rest.contains("lazyui-test hello"), "{e:?}");
+    }
 }

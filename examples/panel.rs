@@ -1,7 +1,8 @@
-//! A layer-shell strip at the bottom-left of the screen for three seconds, drawn by lazyui. Needs a Wayland compositor
+//! A layer-shell strip at the bottom-left of the screen for ten seconds, drawn by lazyui; under finedesktop it follows `ctl theme NAME`. Needs a Wayland compositor
 //! with zwlr_layer_shell_v1. `cargo run --example panel`
 use lazyui::gui::{panel, raster::Raster};
 use lazyui::prelude::*;
+use lazyui::widgets::theme::Theme;
 use lazyui::wl::{self, panel::*, wire};
 
 fn main() -> std::io::Result<()> {
@@ -16,8 +17,21 @@ fn main() -> std::io::Result<()> {
         exclusive: 0,
     };
     let mut p = Panel::open(&mut conn, reg, &globals, &spec)?;
-    let mut ui = Ui::new(col([text("lazyui in a layer-shell panel"), text("closes in 3 s").dim()]));
+    let mut ui = Ui::new(col([text("lazyui in a layer-shell panel"), text("closes in 10 s").dim()]));
     panel::show(&mut p, &mut conn, &mut ui, &mut raster)?;
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(sock) = lazyui::fdctl::socket() {
+        if let Ok(sub) = lazyui::fdctl::subscribe(&sock, &["theme"]) {
+            std::thread::spawn(move || sub.for_each(|e| drop(tx.send(e))));
+        }
+    }
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while let Some(left) = end.checked_duration_since(std::time::Instant::now()) {
+        let Ok(e) = rx.recv_timeout(left) else { break };
+        if let Some(t) = panel::theme_of(&e).and_then(|n| Theme::from_finedesktop(n).ok()) {
+            panel::apply_theme(&mut ui, &mut raster, t);
+            panel::show(&mut p, &mut conn, &mut ui, &mut raster)?;
+        }
+    }
     p.close(&mut conn)
 }
