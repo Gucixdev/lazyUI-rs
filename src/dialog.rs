@@ -115,7 +115,7 @@ impl Widget for Dialog {
             c.text_fit(rect.x + 1, rect.y + 1 + i as i32, inner_w as i32, line, base);
         }
         if let Some(f) = self.field.as_mut() {
-            f.draw(c, Rect::new(rect.x + 1, rect.y + rect.h - 3, inner_w as i32, 1), "> ", &t, true);
+            f.draw(c, Rect::new(rect.x + 1, rect.y + rect.h - 3, inner_w as i32, 1), "> ", t, true);
         }
         let mut x = rect.x + 1 + ((inner_w - buttons_w.min(inner_w)) / 2) as i32;
         let y = rect.y + rect.h - 2;
